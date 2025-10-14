@@ -50,7 +50,7 @@ Please refer to the example below for details -->
             width: 100vw;
         }
 
-        #project-app-container>div,
+        #project-app-container>div, #cockpit-app-container>div,
         .map-app-container>div {
             width: 100%;
             height: 100%;
@@ -86,16 +86,6 @@ Please refer to the example below for details -->
         .project-details .right-micro-app .map-app-container {
             height: 100%;
         }
-        .cockpit-sidebar {
-            background: var(--fh2-sub-bg-color);
-            z-index: 300;
-            display: flex;
-        }
-        .cockpit-ai-alert-container, .cockpit-relay-container {
-            position: relative;
-            z-index: 300;
-            height: 100%;
-        }
     </style>
     <!-- ******* Step 1 - END: Add the Component Container Style *******  -->
 
@@ -117,10 +107,6 @@ Please refer to the example below for details -->
             <div id="project-app-container"></div>
             <div id="project-middle-container"></div>
             <div id="project-right-micro-app" class="right-micro-app">
-                <div id="cockpit-sidebar-placeholder" class="cockpit-sidebar">
-                    <div class="cockpit-relay-container" ></div>
-                    <div class="cockpit-ai-alert-container"></div>
-                </div>
                 <div class="maps-micro-app">
                     <div class="cockpit-left-border-container"></div>
                     <div id="project-map-app-placeholder" class="map-app-placeholder">
