@@ -1,5 +1,5 @@
 <template>
-  <div id="app" class="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-300">
+  <div class="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-300">
     <!-- 路由视图容器 -->
     <router-view />
   </div>
@@ -9,6 +9,7 @@
 export default {
   name: 'App',
   created() {
+    console.log('App 组件已创建')
     // 检查系统主题偏好
     const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
     const isDarkMode = localStorage.getItem('darkMode') === 'true' || (!localStorage.getItem('darkMode') && prefersDark)
@@ -17,6 +18,9 @@ export default {
     if (isDarkMode) {
       document.documentElement.classList.add('dark')
     }
+  },
+  mounted() {
+    console.log('App 组件已挂载')
   }
 }
 </script>
