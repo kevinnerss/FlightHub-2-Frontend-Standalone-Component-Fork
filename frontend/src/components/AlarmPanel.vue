@@ -1,84 +1,89 @@
 <template>
-  <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden h-full flex flex-col">
-    <!-- 标题栏 -->
-    <div class="p-4 bg-gray-50 dark:bg-gray-700 border-b border-gray-200 dark:border-gray-600 flex justify-between items-center">
-      <h3 class="text-lg font-semibold text-gray-900 dark:text-white flex items-center">
-        <i class="fa fa-bell text-red-500 mr-2"></i>
-        报警信息
-        <span v-if="alarms.length > 0" class="ml-2 text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300">
-          {{ alarms.length }}
-        </span>
-      </h3>
-      <button class="text-xs text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400">
-        <i class="fa fa-refresh mr-1"></i>刷新
-      </button>
+  <div class="alarm-panel h-full flex flex-col">
+    <!-- 面板标题 -->
+    <div class="panel-header flex justify-between items-center p-2 border-b">
+      <h3 class="font-medium text-gray-900">报警信息</h3>
+      <div class="flex items-center gap-2">
+        <el-badge 
+          v-if="alarms.length > 0" 
+          :value="alarms.length" 
+          type="danger" 
+          size="small"
+        />
+        <el-button 
+          size="small" 
+          @click="handleRefresh" 
+          plain
+        >
+          刷新
+        </el-button>
+        <el-button 
+          v-if="alarms.length > 0" 
+          size="small" 
+          type="primary" 
+          plain
+          @click="markAllAsProcessed"
+        >
+          全部处理
+        </el-button>
+      </div>
     </div>
     
     <!-- 报警列表 -->
-    <div class="flex-grow overflow-y-auto p-2">
-      <div v-if="alarms.length === 0" class="text-center py-10 text-gray-500 dark:text-gray-400">
-        <i class="fa fa-check-circle text-green-500 text-4xl mb-2"></i>
-        <p>暂无报警信息</p>
-      </div>
+    <div class="alarm-list flex-grow overflow-y-auto p-2">
+      <el-empty v-if="alarms.length === 0" description="暂无报警信息" class="py-4" />
       
-      <div 
-        v-for="alarm in alarms" 
-        :key="alarm.id"
-        class="mb-3 p-3 rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 hover:shadow-md transition-all duration-200"
-      >
-        <!-- 报警头部 -->
-        <div class="flex justify-between items-start">
-          <div>
-            <div class="flex items-center">
-              <h4 class="font-medium text-gray-900 dark:text-white">{{ alarm.title }}</h4>
-              <span 
-                class="ml-2 text-xs px-2 py-0.5 rounded-full"
-                :class="{
-                  'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300': alarm.severity === '高',
-                  'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300': alarm.severity === '中',
-                  'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300': alarm.severity === '低'
-                }"
+      <el-timeline :reverse="false">
+        <el-timeline-item
+          v-for="alarm in alarms"
+          :key="alarm.id"
+          :timestamp="formatTime(alarm.timestamp)"
+          :type="getAlarmType(alarm.severity)"
+          placement="top"
+        >
+          <el-card :shadow="'hover'" class="alarm-card">
+            <div class="flex justify-between items-start mb-2">
+              <h4 class="font-medium text-gray-900">{{ alarm.title }}</h4>
+              <el-tag 
+                size="small" 
+                :type="getAlarmType(alarm.severity)"
+                effect="dark"
               >
                 {{ alarm.severity }}级
-              </span>
+              </el-tag>
             </div>
-            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              {{ formatDateTime(alarm.timestamp) }} · {{ alarm.location }}
-            </p>
-          </div>
-          <button 
-            class="text-gray-400 hover:text-red-500 dark:text-gray-500 dark:hover:text-red-400 transition-colors"
-            @click="$emit('alarm-processed', alarm.id)"
-            title="标记为已处理"
-          >
-            <i class="fa fa-times"></i>
-          </button>
-        </div>
-        
-        <!-- 报警描述 -->
-        <p class="text-sm text-gray-600 dark:text-gray-300 mt-2 line-clamp-2">{{ alarm.description }}</p>
-        
-        <!-- 报警图片 -->
-        <div v-if="alarm.imageUrl" class="mt-3 rounded-md overflow-hidden">
-          <img 
-            :src="alarm.imageUrl" 
-            alt="报警图片" 
-            class="w-full h-32 object-cover hover:opacity-90 transition-opacity"
-            @click="showImageDetail(alarm.imageUrl)"
-          >
-        </div>
-        
-        <!-- 操作按钮 -->
-        <div class="mt-3 flex justify-between">
-          <span class="text-xs text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded">
-            {{ alarm.type }}
-          </span>
-          <button class="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center">
-            查看详情
-            <i class="fa fa-angle-right ml-1"></i>
-          </button>
-        </div>
-      </div>
+            <div class="text-sm text-gray-500 mb-2">{{ alarm.location }}</div>
+            <p class="text-sm text-gray-600 mb-3">{{ alarm.description }}</p>
+            
+            <!-- 报警图片 -->
+            <div v-if="alarm.imageUrl" class="mt-3 mb-3">
+              <el-image
+                :src="alarm.imageUrl"
+                :preview-src-list="[alarm.imageUrl]"
+                class="w-full h-40 object-cover rounded"
+                fit="cover"
+              ></el-image>
+            </div>
+            
+            <div class="flex justify-end gap-2">
+              <el-button 
+                size="small" 
+                type="danger" 
+                @click="$emit('alarm-processed', alarm.id)"
+              >
+                标记已处理
+              </el-button>
+              <el-button 
+                size="small" 
+                type="primary" 
+                @click="showAlarmDetail(alarm)"
+              >
+                查看详情
+              </el-button>
+            </div>
+          </el-card>
+        </el-timeline-item>
+      </el-timeline>
     </div>
   </div>
 </template>
@@ -93,10 +98,17 @@ export default {
     }
   },
   methods: {
+    // 刷新报警列表
+    handleRefresh() {
+      // 这里可以添加刷新逻辑
+      console.log('刷新报警列表')
+      this.$message.info('报警列表已刷新')
+    },
+    
     // 格式化日期时间
-    formatDateTime(dateString) {
-      if (!dateString) return ''
-      const date = new Date(dateString)
+    formatTime(timestamp) {
+      if (!timestamp) return ''
+      const date = new Date(timestamp)
       return date.toLocaleString('zh-CN', {
         month: '2-digit',
         day: '2-digit',
@@ -106,56 +118,143 @@ export default {
       })
     },
     
-    // 显示图片详情
-    showImageDetail(imageUrl) {
-      // 这里可以实现图片放大查看功能
-      console.log('查看图片详情:', imageUrl)
-      // 可以使用模态框或其他方式显示大图
+    // 显示报警详情
+    showAlarmDetail(alarm) {
+      console.log('查看报警详情:', alarm)
+      // 这里可以打开详情对话框
+    },
+    
+    // 标记单个报警为已处理
+    markAsProcessed(alarmId) {
+      this.$emit('alarm-processed', alarmId)
+      this.$message.success('报警已标记为已处理')
+    },
+    
+    // 标记所有报警为已处理
+    markAllAsProcessed() {
+      this.$confirm('确定要标记所有报警为已处理吗？', '确认操作', {
+        confirmButtonText: '确认',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }).then(() => {
+        this.alarms.forEach(alarm => {
+          this.$emit('alarm-processed', alarm.id)
+        })
+        this.$message.success('所有报警已标记为已处理')
+      }).catch(() => {
+        this.$message.info('已取消操作')
+      })
+    },
+    
+    // 获取报警类型样式
+    getAlarmType(severity) {
+      switch(severity) {
+        case '高':
+          return 'danger'
+        case '中':
+          return 'warning'
+        case '低':
+          return 'info'
+        default:
+          return 'info'
+      }
     }
   }
 }
 </script>
 
 <style scoped>
+.alarm-panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background-color: #ffffff;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
 /* 滚动条样式 */
-.flex-grow::-webkit-scrollbar {
-  width: 6px;
+.alarm-list {
+  flex-grow: 1;
+  overflow-y: auto;
 }
 
-.flex-grow::-webkit-scrollbar-track {
-  background: #f1f1f1;
+.alarm-list ::v-deep(.el-scrollbar__wrap) {
+  overflow-x: hidden;
 }
 
-.flex-grow::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
-  border-radius: 3px;
+/* 卡片样式 */
+.alarm-card {
+  margin-bottom: 10px;
+  animation: slideIn 0.3s ease-out;
+  transition: all 0.2s ease;
 }
 
-.flex-grow::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
+.alarm-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
-.dark .flex-grow::-webkit-scrollbar-track {
-  background: #1f2937;
+/* 时间线样式调整 */
+::v-deep(.el-timeline) {
+  padding: 0;
 }
 
-.dark .flex-grow::-webkit-scrollbar-thumb {
-  background: #4b5563;
+::v-deep(.el-timeline-item) {
+  padding-bottom: 20px;
 }
 
-.dark .flex-grow::-webkit-scrollbar-thumb:hover {
-  background: #6b7280;
+::v-deep(.el-timeline-item__timestamp) {
+  top: 2px;
+  font-size: 12px;
+  color: #909399;
 }
 
-/* 报警项动画 */
-.mb-3 {
-  animation: slideIn 0.3s ease-in-out;
+/* 标题栏样式 */
+.panel-header {
+  border-bottom: 1px solid #ebeef5;
+  padding: 10px 15px;
+  background-color: #fafafa;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
+/* 卡片内边距调整 */
+::v-deep(.el-card__body) {
+  padding: 15px;
+}
+
+/* 按钮样式优化 */
+.el-button--small {
+  font-size: 12px;
+  padding: 6px 12px;
+}
+
+/* 高优先级报警闪烁效果 */
+::v-deep(.el-timeline-item__node--danger) {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+}
+
+/* 动画效果 */
 @keyframes slideIn {
   from {
     opacity: 0;
-    transform: translateX(10px);
+    transform: translateX(-20px);
   }
   to {
     opacity: 1;
@@ -163,20 +262,21 @@ export default {
   }
 }
 
-/* 高优先级报警闪烁效果 */
-.border-red-100 {
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.4);
+/* 响应式调整 */
+@media (max-width: 768px) {
+  .alarm-panel {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
   }
-  70% {
-    box-shadow: 0 0 0 10px rgba(220, 38, 38, 0);
+  
+  ::v-deep(.el-timeline-item__timestamp) {
+    position: static;
+    margin-bottom: 5px;
   }
-  100% {
-    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0);
+  
+  ::v-deep(.el-timeline-item__wrapper) {
+    flex-direction: column;
   }
 }
 </style>

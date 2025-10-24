@@ -18,18 +18,5 @@ module.exports = defineConfig({
   // 构建配置
   assetsDir: 'static',
   productionSourceMap: false,
-  filenameHashing: true,
-  // 样式资源处理
-  css: {
-    loaderOptions: {
-      postcss: {
-        postcssOptions: {
-          plugins: [
-            require('tailwindcss'),
-            require('autoprefixer')
-          ]
-        }
-      }
-    }
-  }
+  filenameHashing: true
 })

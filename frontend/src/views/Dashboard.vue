@@ -1,17 +1,29 @@
 <template>
-  <div class="p-4 h-screen overflow-hidden">
-    <div class="grid-layout h-full">
-      <!-- 左侧导航 -->
-      <div class="grid-sidebar overflow-hidden">
-        <drone-route-list 
-          :routes="droneRoutes" 
-          :selected-route-id="selectedRoute?.id"
-          @route-selected="handleRouteSelected"
-        />
-      </div>
-      
+  <el-container class="h-screen overflow-hidden bg-gray-50">
+    <!-- 左侧导航 -->
+    <el-aside width="240px" class="bg-white shadow-sm overflow-hidden">
+      <el-card shadow="never" class="h-full border-0">
+        <template #header>
+          <div class="flex items-center justify-between">
+            <span class="text-lg font-medium">航线管理</span>
+            <el-button type="primary" size="small" plain>
+              新增
+            </el-button>
+          </div>
+        </template>
+        <el-scrollbar class="h-[calc(100%-50px)]">
+          <drone-route-list 
+            :routes="droneRoutes" 
+            :selected-route-id="selectedRoute?.id"
+            @route-selected="handleRouteSelected"
+          />
+        </el-scrollbar>
+      </el-card>
+    </el-aside>
+    
+    <el-container>
       <!-- 顶部进度条 -->
-      <div class="grid-header">
+      <el-header height="60px" class="bg-white border-b p-0">
         <task-progress-bar 
           :progress="taskProgress" 
           :current-task="currentTask" 
@@ -19,51 +31,118 @@
           :completed-tasks="completedTasks" 
           :total-tasks="totalTasks"
         />
-      </div>
+      </el-header>
       
-      <!-- 主内容区 - 3D可视化 -->
-      <div class="grid-main">
-        <visualization-panel 
-          :selected-route="selectedRoute"
-          :alarm-points="alarms"
-          @view-mode-changed="handleViewModeChanged"
-          @layers-changed="handleLayersChanged"
-        />
-      </div>
-      
-      <!-- 右侧面板 -->
-      <div class="grid-right flex flex-col gap-4 overflow-hidden">
-        <!-- 报警信息面板 -->
-        <alarm-panel 
-          :alarms="alarms" 
-          @alarm-processed="handleAlarmProcessed"
-          class="flex-grow"
-        />
+      <el-container class="p-4 gap-4">
+        <!-- 主内容区 - 3D可视化 -->
+        <el-main class="p-0">
+          <el-card shadow="hover" class="h-full border-0">
+            <template #header>
+              <div class="flex items-center justify-between">
+                <span class="text-lg font-medium">3D可视化</span>
+                <div class="flex items-center gap-2">
+                  <el-dropdown>
+                    <el-button type="primary" size="small" plain>
+                      视图模式
+                    </el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item>标准视图</el-dropdown-item>
+                        <el-dropdown-item>俯视图</el-dropdown-item>
+                        <el-dropdown-item>侧视图</el-dropdown-item>
+                        <el-dropdown-item>第一人称视图</el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                  <el-button type="primary" size="small" plain>
+                    刷新
+                  </el-button>
+                </div>
+              </div>
+            </template>
+            <visualization-panel 
+              :selected-route="selectedRoute"
+              :alarm-points="alarms"
+              @view-mode-changed="handleViewModeChanged"
+              @layers-changed="handleLayersChanged"
+              class="h-[calc(100%-60px)]"
+            />
+          </el-card>
+        </el-main>
         
-        <!-- 实时监控面板 -->
-        <monitor-panel 
-          :video-stream-url="videoStreamUrl"
-          :is-streaming="isStreaming"
-          :drone-status="droneStatus"
-          :battery-level="batteryLevel"
-          :altitude="currentAltitude"
-          :speed="currentSpeed"
-          @refresh-stream="handleRefreshStream"
-        />
-        
-        <!-- 控制面板 -->
-        <control-panel 
-          :current-status="droneStatus"
-          :target-altitude="targetAltitude"
-          :target-speed="targetSpeed"
-          @control-action="handleControlAction"
-          @update-altitude="handleUpdateAltitude"
-          @update-speed="handleUpdateSpeed"
-          @emergency-stop="handleEmergencyStop"
-        />
-      </div>
-    </div>
-  </div>
+        <!-- 右侧面板 -->
+        <el-aside width="320px" class="space-y-4 overflow-hidden">
+          <!-- 报警信息面板 -->
+          <el-card shadow="hover" class="h-[35%] border-0">
+            <template #header>
+              <div class="flex items-center justify-between">
+                <span class="text-base font-medium">报警信息</span>
+                <el-badge 
+                  v-if="alarms.length > 0" 
+                  :value="alarms.length" 
+                  type="danger"
+                />
+              </div>
+            </template>
+            <alarm-panel 
+              :alarms="alarms" 
+              @alarm-processed="handleAlarmProcessed"
+              class="h-[calc(100%-50px)]"
+            />
+          </el-card>
+          
+          <!-- 实时监控面板 -->
+          <el-card shadow="hover" class="h-[30%] border-0">
+            <template #header>
+              <div class="flex items-center justify-between">
+                <span class="text-base font-medium">实时监控</span>
+                <el-button 
+                  type="primary" 
+                  size="small" 
+                  plain 
+                  @click="handleRefreshStream"
+                  :loading="!isStreaming"
+                >
+                  {{ isStreaming ? '刷新' : '加载中' }}
+                </el-button>
+              </div>
+            </template>
+            <monitor-panel 
+              :video-stream-url="videoStreamUrl"
+              :is-streaming="isStreaming"
+              :drone-status="droneStatus"
+              :battery-level="batteryLevel"
+              :altitude="currentAltitude"
+              :speed="currentSpeed"
+              class="h-[calc(100%-50px)]"
+            />
+          </el-card>
+          
+          <!-- 控制面板 -->
+          <el-card shadow="hover" class="h-[35%] border-0">
+            <template #header>
+              <div class="flex items-center justify-between">
+                <span class="text-base font-medium">无人机控制</span>
+                <el-tag :type="getStatusTagType(droneStatus)">
+                  {{ droneStatus }}
+                </el-tag>
+              </div>
+            </template>
+            <control-panel 
+              :current-status="droneStatus"
+              :target-altitude="targetAltitude"
+              :target-speed="targetSpeed"
+              @control-action="handleControlAction"
+              @update-altitude="handleUpdateAltitude"
+              @update-speed="handleUpdateSpeed"
+              @emergency-stop="handleEmergencyStop"
+              class="h-[calc(100%-50px)]"
+            />
+          </el-card>
+        </el-aside>
+      </el-container>
+    </el-container>
+  </el-container>
 </template>
 
 <script>
@@ -152,8 +231,33 @@ export default {
     
     // 处理紧急停止
     handleEmergencyStop() {
-      if (confirm('确定执行紧急停止？这将立即中断所有飞行操作。')) {
+      this.$confirm('确定执行紧急停止？这将立即中断所有飞行操作。', '紧急操作', {
+        confirmButtonText: '确认',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }).then(() => {
         this.emergencyStop()
+        this.$message.success('紧急停止指令已执行')
+      }).catch(() => {
+        this.$message.info('已取消紧急停止操作')
+      })
+    },
+    
+    // 获取状态标签类型
+    getStatusTagType(status) {
+      switch (status) {
+        case '飞行中':
+          return 'success'
+        case '悬停中':
+          return 'info'
+        case '待命':
+          return 'primary'
+        case '返回中':
+          return 'warning'
+        case '已停止':
+          return 'danger'
+        default:
+          return 'info'
       }
     },
     

@@ -1,75 +1,62 @@
 <template>
-  <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4">
-    <div class="flex flex-col space-y-3">
+  <el-card shadow="never" class="border-0 p-2">
+    <div class="flex items-center justify-between h-full">
       <!-- 任务信息 -->
-      <div class="flex justify-between items-center">
-        <div>
-          <h3 class="text-lg font-semibold text-gray-900 dark:text-white">当前任务</h3>
-          <p class="text-sm text-gray-600 dark:text-gray-400">{{ currentTask?.name || '无活动任务' }} <span v-if="currentTask?.id">({{ currentTask.id }})</span></p>
+      <div class="task-info">
+        <div class="flex items-center">
+          <el-badge :value="currentTask ? '进行中' : '空闲'" :type="currentTask ? 'primary' : 'info'" />
+          <div class="task-name font-medium ml-2 text-gray-900">{{ typeof currentTask === 'object' ? currentTask.name : currentTask || '暂无任务' }}</div>
         </div>
-        <div class="flex flex-col items-end">
-          <span class="text-xs text-gray-500 dark:text-gray-400">剩余时间</span>
-          <span class="text-lg font-semibold text-blue-600 dark:text-blue-400">{{ remainingTime || '--:--' }}</span>
-        </div>
-      </div>
-      
-      <!-- 进度条 -->
-      <div class="w-full">
-        <div class="relative pt-1">
-          <div class="flex items-center justify-between mb-1">
-            <div>
-              <span class="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-blue-600 bg-blue-200 dark:bg-blue-900 dark:text-blue-300">
-                进度
-              </span>
-            </div>
-            <div class="text-right">
-              <span class="text-xs font-semibold inline-block text-blue-600 dark:text-blue-400">
-                {{ progress }}%
-              </span>
-            </div>
-          </div>
-          
-          <!-- 背景进度条 -->
-          <div class="overflow-hidden h-2 mb-4 text-xs flex rounded-full bg-gray-200 dark:bg-gray-700">
-            <!-- 进度条填充 -->
-            <div 
-              class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-blue-600 transition-all duration-500 ease-in-out"
-              :style="{ width: progress + '%' }"
-            ></div>
-          </div>
+        <div class="task-stats text-sm text-gray-500">
+          已完成 {{ completedTasks }}/{{ totalTasks }} 个任务
         </div>
       </div>
       
-      <!-- 任务统计 -->
-      <div class="flex justify-between items-center text-sm">
-        <div class="flex items-center text-gray-600 dark:text-gray-400">
-          <i class="fa fa-check-circle text-green-500 mr-2"></i>
-          <span>已完成 {{ completedTasks }} / {{ totalTasks }} 个任务</span>
+      <!-- 进度和时间 -->
+      <div class="progress-container flex items-center space-x-6">
+        <div class="progress-bar-wrapper">
+          <el-progress 
+            :percentage="progress" 
+            :stroke-width="8" 
+            :text-inside="true"
+            :color="progressColors"
+            :show-text="true"
+            class="w-80"
+          ></el-progress>
         </div>
-        <button class="text-blue-600 dark:text-blue-400 hover:underline flex items-center">
-          <span>查看任务详情</span>
-          <i class="fa fa-angle-right ml-1"></i>
-        </button>
+        
+        <div class="remaining-time flex items-center">
+          <el-icon class="text-blue-500 mr-2"><Timer /></el-icon>
+          <div>
+            <div class="text-xs text-gray-500">剩余时间</div>
+            <div class="text-sm font-medium text-gray-700">{{ remainingTime || '--:--' }}</div>
+          </div>
+        </div>
       </div>
     </div>
-  </div>
+  </el-card>
 </template>
 
 <script>
+import { Timer } from '@element-plus/icons-vue'
+
 export default {
   name: 'TaskProgressBar',
+  components: {
+    Timer
+  },
   props: {
     progress: {
       type: Number,
       default: 0
     },
     currentTask: {
-      type: Object,
-      default: null
-    },
+        type: [String, Object],
+        default: ''
+      },
     remainingTime: {
       type: String,
-      default: ''
+      default: '00:00:00'
     },
     completedTasks: {
       type: Number,
@@ -79,40 +66,90 @@ export default {
       type: Number,
       default: 0
     }
+  },
+  computed: {
+    // 根据进度值生成颜色渐变
+    progressColors() {
+      return {
+        '0%': '#1890ff',
+        '100%': '#52c41a'
+      }
+    }
   }
 }
 </script>
 
 <style scoped>
-/* 进度条动画 */
-.bg-blue-600 {
-  animation: progressAnimation 2s ease-in-out;
+.task-progress-bar {
+  height: 60px;
 }
 
-@keyframes progressAnimation {
+.progress-container {
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.task-info {
+  flex: 1;
+}
+
+/* 进度条样式 */
+.el-progress-bar__inner {
+  transition: width 1s ease-in-out;
+}
+
+/* 进度条文字样式 */
+.el-progress-bar__innerText {
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* 动画效果 */
+.task-info, .progress-container {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
   from {
-    opacity: 0.7;
+    opacity: 0;
+    transform: translateY(-5px);
   }
   to {
     opacity: 1;
+    transform: translateY(0);
   }
 }
 
-/* 脉冲动画效果 */
-@keyframes pulse {
-  0% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.05);
-  }
-  100% {
-    transform: scale(1);
+/* 响应式调整 */
+@media (max-width: 1200px) {
+  .w-80 {
+    width: 200px !important;
   }
 }
 
-/* 当进度变化时触发动画 */
-.bg-blue-600 {
-  transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
+@media (max-width: 768px) {
+  .el-card {
+    padding: 1px;
+  }
+  
+  .flex {
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  .progress-container {
+    width: 100%;
+    justify-content: center;
+  }
+  
+  .w-80 {
+    width: 100% !important;
+  }
+  
+  .task-info {
+    width: 100%;
+    text-align: center;
+  }
 }
 </style>
