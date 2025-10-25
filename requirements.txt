@@ -1,0 +1,6 @@
+asgiref==3.10.0
+django==4.2.25
+djangorestframework==3.16.1
+paho-mqtt==2.1.0
+sqlparse==0.5.3
+typing-extensions==4.15.0
