@@ -1,5 +1,11 @@
 <template>
   <div class="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-300">
+    <!-- 导航栏 -->
+    <el-menu mode="horizontal" router class="mb-4">
+      <el-menu-item index="/">主控台</el-menu-item>
+      <el-menu-item index="/api-test">API测试</el-menu-item>
+    </el-menu>
+    
     <!-- 路由视图容器 -->
     <router-view />
   </div>

@@ -29,12 +29,17 @@ cd dji_command_center
 # 激活虚拟环境
 source venv/bin/activate
 
+ python -m venv venv# windows激活环境
+ 
+#进入虚拟环境 
+ venv\Scripts\activate
 # 安装依赖
+
 pip install -r requirements.txt
 
 # 初始化数据库
 python manage.py migrate
 
+
 # 启动服务
-# 启动服务
-python manage.py runserver 0.0.0.0:8001
+python manage.py runserver 

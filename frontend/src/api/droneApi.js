@@ -2,7 +2,7 @@ import axios from 'axios'
 
 // 创建axios实例
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: '/api/v1',
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json'
@@ -137,24 +137,22 @@ export default {
   // 获取航线列表
   async getRoutes() {
     try {
-      // 模拟API调用延迟
-      await new Promise(resolve => setTimeout(resolve, 500))
-      // 在实际项目中使用：return api.get('/routes')
-      return mockData.routes
+      // 使用真实API
+      return await api.get('/routes')
     } catch (error) {
-      console.error('获取航线列表失败:', error)
-      return mockData.routes // 出错时返回模拟数据
+      console.error('获取航线列表失败，使用模拟数据:', error)
+      // 出错时返回模拟数据
+      return mockData.routes
     }
   },
   
   // 获取任务数据
   async getTaskData() {
     try {
-      await new Promise(resolve => setTimeout(resolve, 300))
-      // 在实际项目中使用：return api.get('/tasks/current')
-      return mockData.taskData
+      // 使用真实API
+      return await api.get('/tasks/current')
     } catch (error) {
-      console.error('获取任务数据失败:', error)
+      console.error('获取任务数据失败，使用模拟数据:', error)
       return mockData.taskData
     }
   },
@@ -162,11 +160,25 @@ export default {
   // 获取报警列表
   async getAlarms() {
     try {
-      await new Promise(resolve => setTimeout(resolve, 400))
-      // 在实际项目中使用：return api.get('/alarms')
-      return mockData.alarms
+      // 使用真实API获取告警数据
+      const response = await api.get('/alarms/')
+      
+      // 转换数据格式以匹配前端组件的期望格式
+      const alarms = response.map(alarm => ({
+        id: alarm.id,
+        title: alarm.type_name,
+        description: alarm.content,
+        timestamp: alarm.created_at,
+        location: `坐标(${alarm.latitude}, ${alarm.longitude})`,
+        type: alarm.type_name,
+        severity: alarm.status === 'PENDING' ? '高' : 
+                  alarm.status === 'PROCESSING' ? '中' : '低',
+        imageUrl: alarm.image_url || ''
+      }))
+      
+      return alarms
     } catch (error) {
-      console.error('获取报警列表失败:', error)
+      console.error('获取报警列表失败，使用模拟数据:', error)
       return mockData.alarms
     }
   },
@@ -174,11 +186,10 @@ export default {
   // 获取无人机状态
   async getDroneStatus() {
     try {
-      await new Promise(resolve => setTimeout(resolve, 200))
-      // 在实际项目中使用：return api.get('/drone/status')
-      return mockData.droneStatus
+      // 使用真实API
+      return await api.get('/drone/status')
     } catch (error) {
-      console.error('获取无人机状态失败:', error)
+      console.error('获取无人机状态失败，使用模拟数据:', error)
       return mockData.droneStatus
     }
   },
@@ -186,9 +197,12 @@ export default {
   // 处理报警
   async processAlarm(alarmId) {
     try {
-      // 在实际项目中使用：return api.put(`/alarms/${alarmId}/process`)
-      console.log(`处理报警 ${alarmId}`)
-      return { success: true }
+      // 使用真实API处理报警
+      const response = await api.patch(`/alarms/${alarmId}/`, {
+        status: 'PROCESSING',
+        handler: 'Frontend User'
+      })
+      return { success: true, data: response }
     } catch (error) {
       console.error('处理报警失败:', error)
       throw error
@@ -198,9 +212,9 @@ export default {
   // 控制无人机
   async controlDrone(action) {
     try {
-      // 在实际项目中使用：return api.post('/drone/control', { action })
-      console.log(`控制无人机: ${action}`)
-      return { success: true }
+      // 使用真实API控制无人机
+      const response = await api.post('/drone/control/', { action })
+      return { success: true, data: response }
     } catch (error) {
       console.error('控制无人机失败:', error)
       throw error
@@ -210,9 +224,9 @@ export default {
   // 更新高度
   async updateAltitude(altitude) {
     try {
-      // 在实际项目中使用：return api.put('/drone/altitude', { altitude })
-      console.log(`更新高度: ${altitude}m`)
-      return { success: true }
+      // 使用真实API更新高度
+      const response = await api.put('/drone/altitude/', { altitude })
+      return { success: true, data: response }
     } catch (error) {
       console.error('更新高度失败:', error)
       throw error
@@ -222,9 +236,9 @@ export default {
   // 更新速度
   async updateSpeed(speed) {
     try {
-      // 在实际项目中使用：return api.put('/drone/speed', { speed })
-      console.log(`更新速度: ${speed}m/s`)
-      return { success: true }
+      // 使用真实API更新速度
+      const response = await api.put('/drone/speed/', { speed })
+      return { success: true, data: response }
     } catch (error) {
       console.error('更新速度失败:', error)
       throw error
@@ -234,9 +248,9 @@ export default {
   // 紧急停止
   async emergencyStop() {
     try {
-      // 在实际项目中使用：return api.post('/drone/emergency-stop')
-      console.log('执行紧急停止')
-      return { success: true }
+      // 使用真实API执行紧急停止
+      const response = await api.post('/drone/emergency-stop/')
+      return { success: true, data: response }
     } catch (error) {
       console.error('紧急停止失败:', error)
       throw error

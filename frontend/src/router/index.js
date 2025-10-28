@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 // 懒加载路由组件
 const DjiDashboard = () => import('../views/DjiDashboard.vue')
+const ApiTest = () => import('../views/ApiTest.vue')
 
 const routes = [
   {
@@ -10,6 +11,14 @@ const routes = [
     component: DjiDashboard,
     meta: {
       title: '无人机巡检数字孪生系统'
+    }
+  },
+  {
+    path: '/api-test',
+    name: 'ApiTest',
+    component: ApiTest,
+    meta: {
+      title: 'API连通性测试'
     }
   }
 ]

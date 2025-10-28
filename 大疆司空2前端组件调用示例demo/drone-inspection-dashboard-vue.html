@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>无人机巡检数字孪生系统</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Font Awesome -->
+  <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+  <!-- Vue 3 -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <!-- Axios -->
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  
+  <!-- Tailwind 配置 -->
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            primary: '#165DFF',
+            secondary: '#0FC6C2',
+            success: '#00B42A',
+            warning: '#FF7D00',
+            danger: '#F53F3F',
+            info: '#86909C'
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+  
+  <style type="text/tailwindcss">
+    @layer utilities {
+      .content-auto {
+        content-visibility: auto;
+      }
+      .scrollbar-hide::-webkit-scrollbar {
+        display: none;
+      }
+      .scrollbar-thin::-webkit-scrollbar {
+        width: 4px;
+      }
+      .scrollbar-thin::-webkit-scrollbar-thumb {
+        background-color: rgba(156, 163, 175, 0.5);
+        border-radius: 2px;
+      }
+      .grid-layout {
+        display: grid;
+        grid-template-columns: 280px 1fr 300px;
+        grid-template-rows: auto 1fr;
+        grid-template-areas:
+          "sidebar header right"
+          "sidebar main right";
+        gap: 16px;
+      }
+      .grid-sidebar {
+        grid-area: sidebar;
+      }
+      .grid-header {
+        grid-area: header;
+      }
+      .grid-main {
+        grid-area: main;
+      }
+      .grid-right {
+        grid-area: right;
+      }
+    }
+  </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen transition-colors duration-300">
+  <div id="app" class="p-4">
+    <div class="grid-layout h-screen">
+      <!-- 左侧导航 -->
+      <div class="grid-sidebar overflow-hidden">
+        <drone-route-list 
+          :routes="droneRoutes" 
+          @route-selected="handleRouteSelected"
+        />
+      </div>
+      
+      <!-- 顶部进度条 -->
+      <div class="grid-header">
+        <task-progress-bar 
+          :progress="taskProgress" 
+          :current-task="currentTask" 
+          :remaining-time="remainingTime"
+          :completed-tasks="completedTasks" 
+          :total-tasks="totalTasks"
+        />
+      </div>
+      
+      <!-- 主内容区 - 3D可视化 -->
+      <div class="grid-main">
+        <visualization-panel 
+          :selected-route="selectedRoute"
+          :alarm-points="alarms"
+          @view-mode-changed="handleViewModeChanged"
+          @layers-changed="handleLayersChanged"
+        />
+      </div>
+      
+      <!-- 右侧面板 -->
+      <div class="grid-right flex flex-col gap-4 overflow-hidden">
+        <!-- 报警信息面板 -->
+        <alarm-panel 
+          :alarms="alarms" 
+          @alarm-processed="handleAlarmProcessed"
+          class="flex-grow"
+        />
+        
+        <!-- 实时监控面板 -->
+        <monitor-panel 
+          :video-stream-url="videoStreamUrl"
+          :is-streaming="isStreaming"
+          :drone-status="droneStatus"
+          :battery-level="batteryLevel"
+          :altitude="currentAltitude"
+          :speed="currentSpeed"
+          @refresh-stream="handleRefreshStream"
+        />
+        
+        <!-- 控制面板 -->
+        <control-panel 
+          :current-status="droneStatus"
+          :target-altitude="targetAltitude"
+          :target-speed="targetSpeed"
+          @control-action="handleControlAction"
+          @update-altitude="handleUpdateAltitude"
+          @update-speed="handleUpdateSpeed"
+          @emergency-stop="handleEmergencyStop"
+        />
+      </div>
+    </div>
+  </div>
+
+  <!-- 组件导入 -->
+  <script type="module">
+    // 导入组件
+    import DroneRouteList from './components/DroneRouteList.vue'
+    import TaskProgressBar from './components/TaskProgressBar.vue'
+    import AlarmPanel from './components/AlarmPanel.vue'
+    import MonitorPanel from './components/MonitorPanel.vue'
+    import ControlPanel from './components/ControlPanel.vue'
+    import VisualizationPanel from './components/VisualizationPanel.vue'
+
+    // 创建Vue应用
+    const app = Vue.createApp({
+      components: {
+        DroneRouteList,
+        TaskProgressBar,
+        AlarmPanel,
+        MonitorPanel,
+        ControlPanel,
+        VisualizationPanel
+      },
+      data() {
+        return {
+          // 无人机航线数据
+          droneRoutes: [
+            {
+              id: 1,
+              name: '高压线路巡检',
+              status: 'completed',
+              length: 15.2,
+              duration: 45,
+              lastFlight: '2024-01-15 10:30:00',
+              checkpoints: 25
+            },
+            {
+              id: 2,
+              name: '变电站设备检查',
+              status: 'in_progress',
+              length: 3.8,
+              duration: 20,
+              lastFlight: '2024-01-15 14:15:00',
+              checkpoints: 12
+            },
+            {
+              id: 3,
+              name: '风电场巡检',
+              status: 'pending',
+              length: 22.5,
+              duration: 60,
+              lastFlight: '2024-01-14 16:45:00',
+              checkpoints: 36
+            },
+            {
+              id: 4,
+              name: '光伏电站检查',
+              status: 'pending',
+              length: 8.3,
+              duration: 30,
+              lastFlight: '2024-01-14 09:20:00',
+              checkpoints: 18
+            },
+            {
+              id: 5,
+              name: '输电线路走廊巡查',
+              status: 'completed',
+              length: 35.6,
+              duration: 90,
+              lastFlight: '2024-01-13 13:50:00',
+              checkpoints: 52
+            }
+          ],
+          
+          // 任务进度数据
+          taskProgress: 65,
+          currentTask: {
+            name: '变电站设备检查',
+            id: 'T-20240115-001'
+          },
+          remainingTime: '12:45',
+          completedTasks: 8,
+          totalTasks: 12,
+          
+          // 报警数据
+          alarms: [
+            {
+              id: 1,
+              title: '电力线异常发热',
+              description: '在坐标(23.124, 113.235)处检测到电力线温度异常升高，可能存在线路老化或过载情况。',
+              timestamp: '2024-01-15T14:22:35',
+              location: '变电站A区域-东线路',
+              type: '温度异常',
+              severity: '高',
+              imageUrl: 'https://picsum.photos/800/600?random=1'
+            },
+            {
+              id: 2,
+              title: '绝缘子损伤',
+              description: '在铁塔#128处发现绝缘子表面有明显裂纹，需要进一步检查。',
+              timestamp: '2024-01-15T13:45:12',
+              location: '铁塔#128',
+              type: '设备损伤',
+              severity: '中',
+              imageUrl: 'https://picsum.photos/800/600?random=2'
+            },
+            {
+              id: 3,
+              title: '植被靠近',
+              description: '在110kV线路#45-#46段发现树木生长过盛，距离线路仅2.5米，存在安全隐患。',
+              timestamp: '2024-01-15T12:30:48',
+              location: '线路#45-#46',
+              type: '通道隐患',
+              severity: '低',
+              imageUrl: 'https://picsum.photos/800/600?random=3'
+            }
+          ],
+          
+          // 视频流数据
+          videoStreamUrl: 'https://picsum.photos/1280/720?random=10',
+          isStreaming: true,
+          
+          // 无人机状态数据
+          droneStatus: '飞行中',
+          batteryLevel: 78,
+          currentAltitude: 35,
+          currentSpeed: 8,
+          targetAltitude: 40,
+          targetSpeed: 10,
+          
+          // 选中的航线
+          selectedRoute: null,
+          
+          // 系统设置
+          darkMode: true
+        }
+      },
+      mounted() {
+        // 初始化系统设置
+        this.initializeSystem();
+        // 启动模拟数据更新
+        this.startDataSimulation();
+      },
+      methods: {
+        // 初始化系统
+        initializeSystem() {
+          // 设置暗黑模式
+          if (this.darkMode) {
+            document.documentElement.classList.add('dark');
+          }
+          console.log('系统初始化完成');
+        },
+        
+        // 航线选择处理
+        handleRouteSelected(routeId) {
+          this.selectedRoute = this.droneRoutes.find(route => route.id === routeId) || null;
+          console.log('选择航线:', this.selectedRoute);
+        },
+        
+        // 报警处理
+        handleAlarmProcessed(alarmId) {
+          const alarmIndex = this.alarms.findIndex(alarm => alarm.id === alarmId);
+          if (alarmIndex > -1) {
+            this.alarms.splice(alarmIndex, 1);
+            console.log('报警已处理:', alarmId);
+          }
+        },
+        
+        // 控制动作处理
+        handleControlAction(action) {
+          console.log('控制动作:', action);
+          switch (action) {
+            case 'start':
+              this.droneStatus = '飞行中';
+              break;
+            case 'stop':
+              this.droneStatus = '待命';
+              break;
+            case 'pause':
+              this.droneStatus = '暂停';
+              break;
+            case 'return':
+              this.droneStatus = '返回中';
+              break;
+          }
+        },
+        
+        // 更新高度
+        handleUpdateAltitude(altitude) {
+          this.targetAltitude = altitude;
+          console.log('目标高度更新为:', altitude);
+        },
+        
+        // 更新速度
+        handleUpdateSpeed(speed) {
+          this.targetSpeed = speed;
+          console.log('目标速度更新为:', speed);
+        },
+        
+        // 紧急停止
+        handleEmergencyStop() {
+          this.droneStatus = '已停止';
+          this.currentSpeed = 0;
+          console.log('紧急停止已执行');
+        },
+        
+        // 刷新视频流
+        handleRefreshStream() {
+          console.log('刷新视频流');
+          // 模拟刷新视频流
+          this.videoStreamUrl = `https://picsum.photos/1280/720?random=${Date.now()}`;
+        },
+        
+        // 视图模式变更
+        handleViewModeChanged(viewMode) {
+          console.log('视图模式变更为:', viewMode);
+        },
+        
+        // 图层变更
+        handleLayersChanged(layers) {
+          console.log('图层设置变更:', layers);
+        },
+        
+        // 启动数据模拟
+        startDataSimulation() {
+          // 模拟电池电量逐渐下降
+          setInterval(() => {
+            if (this.droneStatus === '飞行中' && this.batteryLevel > 0) {
+              this.batteryLevel = Math.max(0, this.batteryLevel - 0.5);
+            }
+          }, 10000);
+          
+          // 模拟当前高度和目标高度逐渐接近
+          setInterval(() => {
+            if (this.droneStatus === '飞行中' && Math.abs(this.currentAltitude - this.targetAltitude) > 1) {
+              this.currentAltitude += this.targetAltitude > this.currentAltitude ? 1 : -1;
+            }
+            if (this.droneStatus === '飞行中' && Math.abs(this.currentSpeed - this.targetSpeed) > 0.5) {
+              this.currentSpeed += this.targetSpeed > this.currentSpeed ? 0.5 : -0.5;
+            }
+          }, 2000);
+          
+          // 模拟任务进度更新
+          setInterval(() => {
+            if (this.droneStatus === '飞行中' && this.taskProgress < 100) {
+              this.taskProgress = Math.min(100, this.taskProgress + 0.5);
+            }
+          }, 5000);
+        }
+      }
+    })
+
+    // 挂载应用
+    app.mount('#app')
+  </script>
+</body>
+</html>

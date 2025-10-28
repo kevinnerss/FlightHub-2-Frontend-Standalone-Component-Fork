@@ -25,7 +25,7 @@ SECRET_KEY = "django-insecure-$^vuuj6l7%#76l-=k!hx#bynkr4h84@8ck&f7bph$=$dq*6qf6
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
@@ -38,10 +38,12 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     'rest_framework',        # <--- 注册 DRF
+    'corsheaders',           # <--- 添加 CORS 支持
     'telemetry_app',
 ]
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",  # <--- 添加 CORS 中间件
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -49,6 +51,32 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+]
+
+# CORS 配置
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:8082",
+    "http://127.0.0.1:8082",
+]
+
+CORS_ALLOW_CREDENTIALS = True
+
+CORS_ALLOW_METHODS = [
+    "DELETE",
+    "GET",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
+]
+
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "authorization",
+    "content-type",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
 ]
 
 ROOT_URLCONF = "dji_command_center.urls"
