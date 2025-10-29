@@ -3,6 +3,10 @@ import { createRouter, createWebHistory } from 'vue-router'
 // 懒加载路由组件
 const DjiDashboard = () => import('../views/DjiDashboard.vue')
 const ApiTest = () => import('../views/ApiTest.vue')
+const DigitalTwin = () => import('../views/DigitalTwin.vue')
+const TestLayout = () => import('../views/TestLayout.vue')
+const CesiumTest = () => import('../views/CesiumTest.vue')
+const PureCesiumTest = () => import('../views/PureCesiumTest.vue')
 
 const routes = [
   {
@@ -19,6 +23,38 @@ const routes = [
     component: ApiTest,
     meta: {
       title: 'API连通性测试'
+    }
+  },
+  {
+    path: '/digital-twin',
+    name: 'DigitalTwin',
+    component: DigitalTwin,
+    meta: {
+      title: '数字孪生系统'
+    }
+  },
+  {
+    path: '/test-layout',
+    name: 'TestLayout',
+    component: TestLayout,
+    meta: {
+      title: '布局测试'
+    }
+  },
+  {
+    path: '/cesium-test',
+    name: 'CesiumTest',
+    component: CesiumTest,
+    meta: {
+      title: 'Cesium测试'
+    }
+  },
+  {
+    path: '/pure-cesium-test',
+    name: 'PureCesiumTest',
+    component: PureCesiumTest,
+    meta: {
+      title: '纯Cesium测试'
     }
   }
 ]

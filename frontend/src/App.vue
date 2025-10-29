@@ -1,13 +1,19 @@
 <template>
-  <div class="min-h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-300">
+  <div class="h-screen bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-300 flex flex-col">
     <!-- 导航栏 -->
-    <el-menu mode="horizontal" router class="mb-4">
+    <el-menu mode="horizontal" router class="flex-shrink-0">
       <el-menu-item index="/">主控台</el-menu-item>
       <el-menu-item index="/api-test">API测试</el-menu-item>
+      <el-menu-item index="/digital-twin">数字孪生</el-menu-item>
+      <el-menu-item index="/test-layout">布局测试</el-menu-item>
+      <el-menu-item index="/cesium-test">Cesium测试</el-menu-item>
+      <el-menu-item index="/pure-cesium-test">纯Cesium测试</el-menu-item>
     </el-menu>
     
     <!-- 路由视图容器 -->
-    <router-view />
+    <div class="flex-grow overflow-hidden">
+      <router-view class="h-full" />
+    </div>
   </div>
 </template>
 
@@ -43,6 +49,8 @@ html, body {
   font-family: 'Inter', 'system-ui', 'sans-serif';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  height: 100%;
+  overflow: hidden;
 }
 
 /* 自定义滚动条 */
