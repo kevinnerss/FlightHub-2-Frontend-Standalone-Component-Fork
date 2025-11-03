@@ -33,24 +33,24 @@
             <div class="alarm-summary">
               <el-tag 
                 size="small" 
-                :type="getAlarmType(alarm.severity)"
+                :type="getAlarmStatusType(alarm.status)"
               >
-                {{ alarm.severity }}级
+                {{ getStatusText(alarm.status) }}
               </el-tag>
-              <span class="alarm-title">{{ alarm.title }}</span>
-              <span class="alarm-time">{{ formatTime(alarm.timestamp) }}</span>
+              <span class="alarm-title">{{ getAlarmTitle(alarm) }}</span>
+              <span class="alarm-time">{{ formatTime(alarm.created_at) }}</span>
             </div>
           </template>
           <div class="alarm-details">
-            <p class="alarm-description">{{ alarm.description }}</p>
+            <p class="alarm-description">{{ alarm.content }}</p>
             <p class="alarm-location">
               <i class="el-icon-location-information"></i>
-              {{ alarm.location }}
+              位置: {{ alarm.latitude }}, {{ alarm.longitude }}
             </p>
-            <div v-if="alarm.imageUrl" class="alarm-image">
+            <div v-if="alarm.image_url" class="alarm-image">
               <el-image
-                :src="alarm.imageUrl"
-                :preview-src-list="[alarm.imageUrl]"
+                :src="alarm.image_url"
+                :preview-src-list="[alarm.image_url]"
                 fit="cover"
                 style="width: 100%; height: 200px"
               />
@@ -105,14 +105,36 @@ export default {
       })
     },
     
-    // 获取报警类型样式
-    getAlarmType(severity) {
-      switch(severity) {
-        case '高':
-          return 'danger'
-        case '中':
+    // 获取告警标题
+    getAlarmTitle(alarm) {
+      // 优先使用告警类型名称作为标题
+      if (alarm.category_details && alarm.category_details.name) {
+        return alarm.category_details.name
+      }
+      // 如果没有类型信息，使用content的前30个字符
+      return alarm.content ? alarm.content.substring(0, 30) + (alarm.content.length > 30 ? '...' : '') : '未知告警'
+    },
+    
+    // 获取状态文本
+    getStatusText(status) {
+      const statusMap = {
+        'PENDING': '待处理',
+        'PROCESSING': '处理中',
+        'COMPLETED': '已完成',
+        'IGNORED': '已忽略'
+      }
+      return statusMap[status] || status
+    },
+    
+    // 获取状态样式类型
+    getAlarmStatusType(status) {
+      switch(status) {
+        case 'PENDING':
+        case 'PROCESSING':
           return 'warning'
-        case '低':
+        case 'COMPLETED':
+          return 'success'
+        case 'IGNORED':
           return 'info'
         default:
           return 'info'

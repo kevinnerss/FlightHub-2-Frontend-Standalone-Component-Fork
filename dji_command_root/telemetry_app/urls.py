@@ -2,14 +2,13 @@
 
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-# 1. 导入新的 ViewSet 名称
-from .views import AlarmViewSet, AlarmCategoryViewSet
+# 导入所有 ViewSet
+from .views import AlarmViewSet, AlarmCategoryViewSet, WaylineViewSet
 
 router = DefaultRouter()
 router.register(r'alarms', AlarmViewSet)
-# 2. 注册新的 ViewSet 名称
 router.register(r'alarm-categories', AlarmCategoryViewSet, basename='alarmcategory')
-# (推荐将 URL 也改为 'alarm-categories' 以保持一致)
+router.register(r'waylines', WaylineViewSet)  # 注册航线视图集
 
 urlpatterns = [
     path('', include(router.urls)),

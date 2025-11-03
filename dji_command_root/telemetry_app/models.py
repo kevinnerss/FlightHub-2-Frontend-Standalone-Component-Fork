@@ -1,6 +1,49 @@
 from django.db import models
 
 
+class Wayline(models.Model):
+    """
+    航线表
+    存储无人机飞行航线信息
+    """
+    wayline_id = models.CharField(max_length=50, unique=True, verbose_name="航线ID")
+    name = models.CharField(max_length=100, verbose_name="航线名称")
+    description = models.TextField(blank=True, null=True, verbose_name="航线描述")
+    
+    # 航线数据
+    waypoints = models.JSONField(blank=True, null=True, verbose_name="航点数据")  # 存储航点坐标等信息
+    length = models.FloatField(blank=True, null=True, verbose_name="航线长度(米)")
+    estimated_duration = models.IntegerField(blank=True, null=True, verbose_name="预计飞行时间(秒)")
+    
+    # 状态信息
+    STATUS_CHOICES = [
+        ('DRAFT', '草稿'),
+        ('ACTIVE', '激活'),
+        ('ARCHIVED', '已归档'),
+    ]
+    status = models.CharField(
+        max_length=10,
+        choices=STATUS_CHOICES,
+        default='DRAFT',
+        verbose_name="航线状态"
+    )
+    
+    # 创建者信息
+    created_by = models.CharField(max_length=50, blank=True, null=True, verbose_name="创建人")
+    
+    # 时间戳
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+    
+    class Meta:
+        verbose_name = "航线信息"
+        verbose_name_plural = "航线信息"
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"航线 {self.wayline_id} - {self.name}"
+
+
 class AlarmCategory(models.Model):
     """
     告警类型表 (层级结构)
@@ -38,6 +81,16 @@ class AlarmCategory(models.Model):
 
 class Alarm(models.Model):
     """告警信息表"""
+
+    # 航线ID字段 - 改为外键关联
+    wayline = models.ForeignKey(
+        Wayline,
+        on_delete=models.SET_NULL,  # 当航线被删除时，将告警的航线引用设为NULL
+        null=True,
+        blank=True,
+        related_name='alarms',  # 允许从航线查询关联的所有告警
+        verbose_name="关联航线"
+    )
 
     # 关联字段
     # 1. 字段名从 'type' 改为 'category' (避免 'type' 成为 Python 关键字)

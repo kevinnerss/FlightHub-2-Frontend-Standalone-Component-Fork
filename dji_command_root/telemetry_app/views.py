@@ -2,8 +2,8 @@ from rest_framework import viewsets
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 
-from .models import Alarm, AlarmCategory
-from .serializers import AlarmSerializer, AlarmCategorySerializer
+from .models import Alarm, AlarmCategory, Wayline
+from .serializers import AlarmSerializer, AlarmCategorySerializer, WaylineSerializer
 from .filters import AlarmFilter  # 导入我们定义的过滤器
 
 
@@ -33,8 +33,8 @@ class AlarmViewSet(viewsets.ModelViewSet):
     """
 
     # 1. 优化 Queryset (非常重要)
-    #    使用 select_related 预加载 'category'，防止 N+1 查询
-    queryset = Alarm.objects.select_related('category').all()
+    #    使用 select_related 预加载 'category' 和 'wayline'，防止 N+1 查询
+    queryset = Alarm.objects.select_related('category', 'wayline').all()
 
     serializer_class = AlarmSerializer
 
@@ -55,12 +55,38 @@ class AlarmViewSet(viewsets.ModelViewSet):
         'content',  # 搜索告警内容
         'handler',  # 搜索处理人
         'category__name',  # 跨表搜索类型名称
+        'category__code',  # 跨表搜索类型代码
+        'wayline__wayline_id',  # 跨表搜索航线ID
+        'wayline__name',  # 跨表搜索航线名称
         'specific_data'  # 搜索 JSON 字段 (取决于数据库支持)
     ]
 
     # 5. (OrderingFilter) 配置允许排序的字段
     #    这会启用 ?ordering=-created_at ...
     ordering_fields = ['created_at', 'updated_at', 'status']
+
+
+class WaylineViewSet(viewsets.ModelViewSet):
+    """
+    航线信息管理（增删改查）
+    - 支持分页
+    - 支持搜索
+    - 支持排序
+    """
+    queryset = Wayline.objects.all()
+    serializer_class = WaylineSerializer
+    
+    # 挂载过滤器后端
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    
+    # 配置搜索字段
+    search_fields = ['wayline_id', 'name', 'description', 'created_by']
+    
+    # 配置排序字段
+    ordering_fields = ['created_at', 'updated_at', 'status', 'name']
+    
+    # 默认排序
+    ordering = ['-created_at']
 
     # 6. get_queryset (可选)
     #    由于 django-filter 已经接管了过滤，这个函数现在可以保持简单，

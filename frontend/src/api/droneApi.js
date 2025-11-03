@@ -166,11 +166,11 @@ export default {
       // 转换数据格式以匹配前端组件的期望格式
       const alarms = response.map(alarm => ({
         id: alarm.id,
-        title: alarm.type_name,
+        title: alarm.category_details.name,
         description: alarm.content,
         timestamp: alarm.created_at,
         location: `坐标(${alarm.latitude}, ${alarm.longitude})`,
-        type: alarm.type_name,
+        type: alarm.category_details.name,
         severity: alarm.status === 'PENDING' ? '高' : 
                   alarm.status === 'PROCESSING' ? '中' : '低',
         imageUrl: alarm.image_url || ''

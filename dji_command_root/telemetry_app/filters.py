@@ -45,6 +45,27 @@ class AlarmFilter(django_filters.FilterSet):
         label='告警状态'
     )
 
+    # 6. 允许通过 航线ID 模糊查询 (使用外键关系)
+    wayline_id = django_filters.CharFilter(
+        field_name='wayline__wayline_id',
+        lookup_expr='icontains',  # 忽略大小写的模糊匹配
+        label='航线ID (模糊)'
+    )
+    
+    # 7. 允许通过 航线名称 模糊查询
+    wayline_name = django_filters.CharFilter(
+        field_name='wayline__name',
+        lookup_expr='icontains',
+        label='航线名称 (模糊)'
+    )
+    
+    # 8. 允许通过 航线 对象ID 精确查询
+    wayline = django_filters.NumberFilter(
+        field_name='wayline',
+        lookup_expr='exact',
+        label='航线ID (精确)'
+    )
+
     class Meta:
         model = Alarm
         # 'fields' 列表包含最简单的过滤器 (DRF 会自动推断类型)
@@ -52,6 +73,9 @@ class AlarmFilter(django_filters.FilterSet):
             'status',  # 我们在上面自定义了, 但在这里声明更清晰
             'handler',  # 允许 ?handler=张三 (精确匹配)
             'category',  # 允许 ?category=5 (按 告警类型ID 精确匹配)
+            'wayline',  # 允许 ?wayline=1 (按航线对象ID精确匹配)
+            'wayline_id',  # 允许 ?wayline_id=WL001 (按航线ID模糊匹配)
+            'wayline_name',  # 允许 ?wayline_name=测试航线 (按航线名称模糊匹配)
             'start_date',
             'end_date',
             'category_name',

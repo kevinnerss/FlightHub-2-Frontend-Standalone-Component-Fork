@@ -12,7 +12,7 @@ import random
 
 # 1.1 设置 DJANGO_SETTINGS_MODULE 环境变量
 # 这是告诉 Python 解释器去哪里找 settings.py 的关键步骤
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dji_command_center.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dji_command_root.settings')
 
 # 1.2 执行 setup() 加载应用注册表和所有配置
 django.setup()
@@ -22,26 +22,26 @@ django.setup()
 # ====================================================================
 
 # 必须在 django.setup() 之后才能安全导入模型
-from telemetry_app.models import Alarm, AlarmType
+from telemetry_app.models import Alarm, AlarmCategory
 
 
 def generate_alarms():
-    # --- 1. 确保 AlarmType 存在并获取 ---
+    # --- 1. 确保 AlarmCategory 存在并获取 ---
 
     # 清空旧数据 (可选，测试时建议保留)
     # Alarm.objects.all().delete()
-    # AlarmType.objects.all().delete()
+    # AlarmCategory.objects.all().delete()
 
     try:
-        INSPECT_TYPE = AlarmType.objects.get(code='INSPECTION_FAIL')
-        FAULT_TYPE = AlarmType.objects.get(code='DEVICE_FAULT')
-    except AlarmType.DoesNotExist:
+        INSPECT_TYPE = AlarmCategory.objects.get(code='INSPECTION_FAIL')
+        FAULT_TYPE = AlarmCategory.objects.get(code='DEVICE_FAULT')
+    except AlarmCategory.DoesNotExist:
         # 如果类型不存在，手动创建它
         print("警告：告警类型不存在，正在为您创建...")
-        AlarmType.objects.create(name='设备故障', code='DEVICE_FAULT', description='无人机/机场连接中断')
-        AlarmType.objects.create(name='巡检异常', code='INSPECTION_FAIL', description='AI 算法识别到目标缺陷')
-        INSPECT_TYPE = AlarmType.objects.get(code='INSPECTION_FAIL')
-        FAULT_TYPE = AlarmType.objects.get(code='DEVICE_FAULT')
+        AlarmCategory.objects.create(name='设备故障', code='DEVICE_FAULT', description='无人机/机场连接中断')
+        AlarmCategory.objects.create(name='巡检异常', code='INSPECTION_FAIL', description='AI 算法识别到目标缺陷')
+        INSPECT_TYPE = AlarmCategory.objects.get(code='INSPECTION_FAIL')
+        FAULT_TYPE = AlarmCategory.objects.get(code='DEVICE_FAULT')
         print("告警类型创建完成。")
 
 
@@ -78,7 +78,7 @@ def generate_alarms():
         ]
 
         new_alarm = Alarm(
-            type=alarm_type,
+            category=alarm_type,
             latitude=lat,
             longitude=lon,
             content=random.choice(content_list),

@@ -2,11 +2,8 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 // 懒加载路由组件
 const DjiDashboard = () => import('../views/DjiDashboard.vue')
-const ApiTest = () => import('../views/ApiTest.vue')
 const DigitalTwin = () => import('../views/DigitalTwin.vue')
-const TestLayout = () => import('../views/TestLayout.vue')
-const CesiumTest = () => import('../views/CesiumTest.vue')
-const PureCesiumTest = () => import('../views/PureCesiumTest.vue')
+const AlarmManagement = () => import('../views/AlarmManagement.vue')
 
 const routes = [
   {
@@ -14,15 +11,7 @@ const routes = [
     name: 'DjiDashboard',
     component: DjiDashboard,
     meta: {
-      title: '无人机巡检数字孪生系统'
-    }
-  },
-  {
-    path: '/api-test',
-    name: 'ApiTest',
-    component: ApiTest,
-    meta: {
-      title: 'API连通性测试'
+      title: '主控台'
     }
   },
   {
@@ -30,31 +19,15 @@ const routes = [
     name: 'DigitalTwin',
     component: DigitalTwin,
     meta: {
-      title: '数字孪生系统'
+      title: '数字孪生'
     }
   },
   {
-    path: '/test-layout',
-    name: 'TestLayout',
-    component: TestLayout,
+    path: '/alarm-management',
+    name: 'AlarmManagement',
+    component: AlarmManagement,
     meta: {
-      title: '布局测试'
-    }
-  },
-  {
-    path: '/cesium-test',
-    name: 'CesiumTest',
-    component: CesiumTest,
-    meta: {
-      title: 'Cesium测试'
-    }
-  },
-  {
-    path: '/pure-cesium-test',
-    name: 'PureCesiumTest',
-    component: PureCesiumTest,
-    meta: {
-      title: '纯Cesium测试'
+      title: '告警管理'
     }
   }
 ]

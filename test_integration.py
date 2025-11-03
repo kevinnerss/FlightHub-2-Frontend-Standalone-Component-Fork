@@ -13,7 +13,7 @@ def test_api_connectivity():
     # 测试1: 获取告警类型
     print("\n1. 测试获取告警类型:")
     try:
-        response = requests.get(f"{BASE_URL}/alarmtypes/")
+        response = requests.get(f"{BASE_URL}/alarm-categories/")
         if response.status_code == 200:
             alarm_types = response.json()
             print(f"   成功获取到 {len(alarm_types)} 个告警类型:")
@@ -33,7 +33,7 @@ def test_api_connectivity():
             print(f"   成功获取到 {len(alarms)} 条告警信息")
             if alarms:
                 alarm = alarms[0]
-                print(f"   最新告警: {alarm['type_name']} - {alarm['content']}")
+                print(f"   最新告警: {alarm['category_details']['name']} - {alarm['content']}")
         else:
             print(f"   失败，状态码: {response.status_code}")
     except Exception as e:
@@ -46,7 +46,7 @@ def test_api_connectivity():
         if response.status_code == 200:
             alarm = response.json()
             print(f"   成功获取告警ID为1的信息:")
-            print(f"   - 类型: {alarm['type_name']}")
+            print(f"   - 类型: {alarm['category_details']['name']}")
             print(f"   - 内容: {alarm['content']}")
             print(f"   - 状态: {alarm['status']}")
         elif response.status_code == 404:
