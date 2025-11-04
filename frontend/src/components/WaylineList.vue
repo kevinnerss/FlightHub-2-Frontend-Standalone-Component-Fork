@@ -1,5 +1,5 @@
 <template>
-  <div class="wayline-list-container">
+  <div class="wayline-list-container tech-border">
     <div class="header-actions">
       <!-- <h2 class="title">航线列表</h2> -->
     </div>
@@ -14,6 +14,7 @@
       :fit="true"
       :row-class-name="tableRowClassName"
       @row-click="handleRowClick"
+      class="tech-table"
     >
       <el-table-column prop="id" label="ID" min-width="60" />
       <el-table-column prop="name" label="航线名称" min-width="180" show-overflow-tooltip />
@@ -157,11 +158,12 @@ export default {
 <style scoped>
 .wayline-list-container {
   padding: 10px;
-  background: #fff;
+  background: #1f2937;
   border-radius: 4px;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
+  color: #d1d5db;
 }
 
 .header-actions {
@@ -170,16 +172,54 @@ export default {
 
 .title {
   margin: 0;
-  color: #303133;
+  color: #3b82f6;
   font-size: 16px;
 }
 
 /* 为选中的行添加特殊样式 */
 :deep(.el-table__row.selected-row) {
-  background-color: #e6f7ff !important;
+  background-color: #1e3a8a !important;
 }
 
 :deep(.el-table__row.selected-row:hover) {
-  background-color: #bae7ff !important;
+  background-color: #1e40af !important;
+}
+
+/* Element Plus 表格暗黑金属风格覆盖 */
+:deep(.el-table) {
+  --el-table-header-bg-color: #1f2937;
+  --el-table-header-text-color: #93c5fd;
+  --el-table-row-hover-bg-color: #1e3a8a;
+  --el-table-border-color: #374151;
+  --el-table-text-color-primary: #d1d5db;
+  --el-table-bg-color: #1f2937;
+  --el-table-empty-text-color: #9ca3af;
+  border: 1px solid #374151;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.2);
+}
+
+:deep(.el-table__header-wrapper th) {
+  border-bottom: 1px solid #374151;
+  color: #93c5fd;
+  font-weight: 500;
+}
+
+:deep(.el-table__body-wrapper td) {
+  border-bottom: 1px solid #374151;
+  color: #d1d5db;
+}
+
+:deep(.el-table__body-wrapper tr:not(.selected-row)) {
+  background-color: #1f2937;
+}
+
+:deep(.el-table__body-wrapper tr:not(.selected-row):hover) {
+  background-color: #1e3a8a;
+}
+
+/* 科技感表格边框 */
+.tech-table {
+  border: 1px solid #374151;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.2);
 }
 </style>

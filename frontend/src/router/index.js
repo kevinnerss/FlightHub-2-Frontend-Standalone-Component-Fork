@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 // 懒加载路由组件
 const DjiDashboard = () => import('../views/DjiDashboard.vue')
-const DigitalTwin = () => import('../views/DigitalTwin.vue')
+
 const AlarmManagement = () => import('../views/AlarmManagement.vue')
 
 const routes = [
@@ -14,14 +14,7 @@ const routes = [
       title: '主控台'
     }
   },
-  {
-    path: '/digital-twin',
-    name: 'DigitalTwin',
-    component: DigitalTwin,
-    meta: {
-      title: '数字孪生'
-    }
-  },
+
   {
     path: '/alarm-management',
     name: 'AlarmManagement',

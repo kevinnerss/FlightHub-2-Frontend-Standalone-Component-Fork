@@ -1,23 +1,20 @@
 <template>
-  <div class="dji-dashboard h-screen flex flex-col">
+  <div class="dji-dashboard h-screen flex flex-col grid-bg">
     <!-- 顶部导航 -->
-    <div class="header bg-white border-b flex items-center justify-between px-4 h-16 flex-shrink-0">
-      <div class="flex items-center">
-        <h1 class="text-xl font-bold">无人机巡检主控台</h1>
-      </div>
-      <div class="flex items-center gap-2">
-        <el-button @click="resetView">重置视角</el-button>
-        <el-button @click="toggleWireframe">{{ wireframe ? '实体模式' : '线框模式' }}</el-button>
+    <div style="height: 64px; background-color: #111827; border-bottom: 1px solid #1f2937;">
+      <!-- 标题居中 - 最简单的flex布局实现 -->
+      <div style="display: flex; align-items: center; justify-content: center; height: 100%;">
+        <h1 style="margin: 0; font-size: 28px; font-weight: bold; color: #3b82f6; text-align: center;">无人机巡检主控台</h1>
       </div>
     </div>
     
     <!-- 主内容区 -->
     <div class="main-content flex flex-1 overflow-hidden">
       <!-- 左侧控制面板 -->
-      <div class="left-panel w-60 bg-white border-r p-4 overflow-y-auto flex-shrink-0">
+      <div class="left-panel w-60 bg-gray-900 border-r border-gray-800 p-4 overflow-y-auto flex-shrink-0 tech-border">
         <!-- 航线管理 -->
-        <div class="panel-section mb-6">
-          <h3 class="text-base font-medium mb-3">航线管理</h3>
+        <div class="panel-section mb-6 tech-border">
+          <h3 class="text-base font-medium mb-3 text-blue-400">航线管理</h3>
           <div class="space-y-2">
             <!-- <el-button type="primary" @click="openWaylineCreation" class="w-full" :disabled="!fh2Loaded">新增航线</el-button> -->
             
@@ -29,7 +26,7 @@
               @wayline-selected="handleWaylineSelected"
             />
             
-            <div v-else class="text-sm text-gray-500">
+            <div v-else class="text-sm text-gray-400">
               <p>航线列表将在这里显示（由大疆组件提供）</p>
             </div>
           </div>
@@ -37,10 +34,10 @@
       </div>
       
       <!-- 3D模型视图区域 -->
-      <div class="model-view flex-1 flex flex-col">
+        <div class="model-view flex-1 flex flex-col tech-border">
         <!-- 任务进度条 -->
-        <div class="progress-container bg-white border-b p-4">
-          <h3 class="text-base font-medium mb-2">任务进度</h3>
+          <div class="progress-container bg-gray-900 border-b border-gray-800 p-4 glass-effect">
+            <h3 class="text-base font-medium mb-2 text-blue-400">任务进度</h3>
           <TaskProgressBar 
             :progress="taskProgress"
             :current-task="currentTask"
@@ -51,54 +48,54 @@
         </div>
         
         <!-- Cesium容器 -->
-        <div ref="cesiumWrapper" class="cesium-wrapper flex-1 relative">
-          <!-- 加载指示器 -->
-          <div v-if="loading" class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 z-10">
-            <div class="flex flex-col items-center">
-              <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-2"></div>
-              <span class="text-white">正在加载模型...</span>
+          <div ref="cesiumWrapper" class="cesium-wrapper flex-1 relative">
+            <!-- 加载指示器 -->
+            <div v-if="loading" class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-70 z-10 glass-effect">
+              <div class="flex flex-col items-center">
+                <div class="w-12 h-12 border-4 border-blue-400 border-t-transparent rounded-full animate-spin mb-2 glow-blue"></div>
+                <span class="text-blue-300">正在加载模型...</span>
+              </div>
             </div>
-          </div>
-          
-          <!-- 错误信息 -->
-          <div v-if="error" class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 z-10">
-            <el-alert
-              :title="error"
-              type="error"
-              show-icon
-              class="w-96"
-            />
-          </div>
-          
-          <!-- 显示FH2加载状态提示
-          <div v-if="!fh2Loaded && !loading && !error" class="absolute top-4 right-4 z-10">
-            <el-alert
-              title="大疆组件未正确加载，使用备用功能"
-              type="warning"
-              show-icon
-              :closable="false"
-              class="max-w-xs"
-            />
-          </div> -->
+            
+            <!-- 错误信息 -->
+            <div v-if="error" class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-70 z-10 glass-effect">
+              <el-alert
+                :title="error"
+                type="error"
+                show-icon
+                class="w-96 tech-border"
+              />
+            </div>
+            
+            <!-- 显示FH2加载状态提示
+            <div v-if="!fh2Loaded && !loading && !error" class="absolute top-4 right-4 z-10">
+              <el-alert
+                title="大疆组件未正确加载，使用备用功能"
+                type="warning"
+                show-icon
+                :closable="false"
+                class="max-w-xs tech-border"
+              />
+            </div> -->
         </div>
       </div>
       
       <!-- 右侧控制面板 -->
-      <div class="right-panel w-60 bg-white border-l p-4 overflow-y-auto flex-shrink-0">
+        <div class="right-panel w-60 bg-gray-900 border-l border-gray-800 p-4 overflow-y-auto flex-shrink-0 tech-border">
         <!-- 报警信息 -->
-        <div class="panel-section mb-6">
-          <h3 class="text-base font-medium mb-3">报警信息</h3>
+          <div class="panel-section mb-6 tech-border">
+            <h3 class="text-base font-medium mb-3 text-blue-400">报警信息</h3>
           <div class="mb-2 text-sm">
-            <span v-if="selectedWayline">
-              当前航线: {{ selectedWayline.name }}
-            </span>
-            <span v-else class="text-gray-500">
-              未选择航线
-            </span>
-          </div>
-          <div v-if="loadingAlarms" class="loading-container h-64 flex items-center justify-center">
-            <el-spinner type="primary" />
-          </div>
+              <span v-if="selectedWayline" class="text-blue-300">
+                当前航线: {{ selectedWayline.name }}
+              </span>
+              <span v-else class="text-gray-400">
+                未选择航线
+              </span>
+            </div>
+          <div v-if="loadingAlarms" class="loading-container h-64 flex items-center justify-center tech-border">
+              <el-spinner type="primary" />
+            </div>
           <AlarmPanel 
             v-else
             :alarms="getFilteredAlarms()"
@@ -110,20 +107,20 @@
         </div>
         
         <!-- 实时监控 -->
-        <div class="panel-section mb-6">
-          <h3 class="text-base font-medium mb-3">实时监控</h3>
-          <div class="h-32 flex items-center justify-center">
-            <p class="text-gray-500 text-sm">实时监控将在这里显示（由大疆组件提供）</p>
+          <div class="panel-section mb-6 tech-border-glow">
+            <h3 class="panel-title text-blue-400">实时监控</h3>
+            <div class="h-32 flex items-center justify-center tech-border glass-effect">
+              <p class="text-blue-300 text-sm">实时监控将在这里显示（由大疆组件提供）</p>
+            </div>
           </div>
-        </div>
-        
-        <!-- 无人机控制 -->
-        <div class="panel-section mb-6">
-          <h3 class="text-base font-medium mb-3">无人机控制</h3>
-          <div class="h-32 flex items-center justify-center">
-            <p class="text-gray-500 text-sm">控制面板将在这里显示（由大疆组件提供）</p>
+          
+          <!-- 无人机控制 -->
+          <div class="panel-section mb-6 tech-border-glow">
+            <h3 class="panel-title text-blue-400">无人机控制</h3>
+            <div class="h-32 flex items-center justify-center tech-border glass-effect">
+              <p class="text-blue-300 text-sm">控制面板将在这里显示（由大疆组件提供）</p>
+            </div>
           </div>
-        </div>
       </div>
     </div>
     
@@ -134,6 +131,7 @@
       width="90%"
       height="90%"
       destroy-on-close
+      class="tech-dialog glass-effect"
     >
       <div style="height: 70vh">
         <DjiWaylineCreation 
@@ -150,6 +148,7 @@
       title="告警详情"
       width="800px"
       :close-on-click-modal="false"
+      class="tech-dialog glass-effect"
     >
       <div v-if="currentAlarm" class="alarm-detail-container">
         <div class="detail-row">
@@ -165,7 +164,10 @@
         <div class="detail-row">
           <div class="detail-label">告警状态：</div>
           <div class="detail-value">
-            <el-tag :type="currentAlarm.status === 'PENDING' || currentAlarm.status === 'PROCESSING' ? 'warning' : currentAlarm.status === 'COMPLETED' ? 'success' : 'info'">
+            <el-tag 
+              :type="getAlarmStatusType(currentAlarm.status)"
+              :class="`alarm-status-${currentAlarm.status.toLowerCase()}`"
+            >
               {{ getStatusText(currentAlarm.status) }}
             </el-tag>
           </div>
@@ -210,7 +212,7 @@
       </div>
       
       <div slot="footer" class="dialog-footer">
-        <el-button @click="showAlarmDetail = false">关闭</el-button>
+        <el-button class="tech-button" @click="showAlarmDetail = false">关闭</el-button>
       </div>
     </el-dialog>
   </div>
@@ -225,24 +227,109 @@
   margin-bottom: 20px;
   display: flex;
   align-items: flex-start;
+  border-bottom: 1px solid rgba(75, 85, 99, 0.3);
+  padding-bottom: 10px;
+}
+
+.detail-row:last-child {
+  border-bottom: none;
 }
 
 .detail-label {
   width: 100px;
   font-weight: bold;
-  color: #606266;
+  color: #93c5fd;
   margin-right: 10px;
+  flex-shrink: 0;
 }
 
 .detail-value {
   flex: 1;
-  color: #303133;
+  color: #d1d5db;
+  font-family: 'JetBrains Mono', monospace;
 }
 
 .full-width {
   word-break: break-all;
   line-height: 1.8;
+  background: rgba(31, 41, 55, 0.5);
+  padding: 8px;
+  border-radius: 4px;
+  border-left: 3px solid #3b82f6;
 }
+
+/* 待处理状态样式 - 红色 */
+.alarm-status-pending {
+  background: linear-gradient(135deg, #ef4444, #b91c1c) !important;
+  border-color: #ef4444 !important;
+  color: white !important;
+  font-weight: 500;
+}
+
+/* 处理中状态样式 - 橙色 */
+.alarm-status-processing {
+  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+  border-color: #f59e0b !important;
+  color: white !important;
+  font-weight: 500;
+}
+
+/* 已完成状态样式 - 绿色 */
+.alarm-status-completed {
+  background: linear-gradient(135deg, #10b981, #059669) !important;
+  border-color: #10b981 !important;
+  color: white !important;
+  font-weight: 500;
+}
+
+/* 已忽略状态样式 - 蓝色 */
+.alarm-status-ignored {
+  background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
+  border-color: #3b82f6 !important;
+  color: white !important;
+  font-weight: 500;
+}
+  /* 科技风格对话框 */
+  .tech-dialog {
+    background-color: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+  }
+
+  .tech-dialog :deep(.el-dialog__header) {
+    background-color: #111827;
+    border-bottom: 1px solid #374151;
+  }
+
+  .tech-dialog :deep(.el-dialog__title) {
+    color: #3b82f6;
+    font-weight: 600;
+  }
+
+  .tech-dialog :deep(.el-dialog__body) {
+    background-color: #1f2937;
+    color: #d1d5db;
+  }
+
+  .tech-dialog :deep(.el-dialog__footer) {
+    background-color: #111827;
+    border-top: 1px solid #374151;
+  }
+
+  /* 科技风格按钮 */
+  .tech-button {
+    background-color: #1f2937;
+    border: 1px solid #374151;
+    color: #d1d5db;
+    transition: all 0.3s ease;
+  }
+
+  .tech-button:hover {
+    background-color: #374151;
+    border-color: #3b82f6;
+    box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
+  }
 </style>
 
 <script>
@@ -273,7 +360,7 @@ export default {
       tileset: null,
       loading: false,
       error: '',
-      wireframe: false,
+  
       resizeObserver: null,
       debouncedForceResize: null,
       // 大疆组件加载状态
@@ -503,6 +590,17 @@ export default {
     getFilteredAlarms() {
       // 直接返回从API获取的告警信息，因为我们已经根据航线ID过滤过了
       return this.alarms
+    },
+    
+    // 获取告警状态类型样式
+    getAlarmStatusType(status) {
+      const typeMap = {
+        'PENDING': 'danger',    // 待处理 - 红色
+        'PROCESSING': 'warning', // 处理中 - 橙色
+        'COMPLETED': 'success',  // 已完成 - 绿色
+        'IGNORED': 'info'        // 已忽略 - 蓝色
+      }
+      return typeMap[status] || 'default'
     },
     async initCesium() {
       try {
@@ -795,26 +893,7 @@ export default {
         this.viewer.flyTo(this.tileset)
       }
     },
-    async resetView() {
-      if (this.viewer) {
-        // 重置到初始视角
-        const Cesium = await import('cesium')
-        this.viewer.camera.setView({
-          destination: Cesium.Cartesian3.fromDegrees(116.3913, 39.9075, 1000),
-          orientation: {
-            heading: Cesium.Math.toRadians(0),
-            pitch: Cesium.Math.toRadians(-30),
-            roll: 0.0
-          }
-        })
-      }
-    },
-    toggleWireframe() {
-      if (!this.tileset) return
-      
-      this.wireframe = !this.wireframe
-      this.tileset.debugWireframe = this.wireframe
-    }
+
   }
 }
 </script>
@@ -851,10 +930,11 @@ export default {
   flex: 1;
   position: relative;
   min-height: 0; /* 防止flex子元素溢出 */
-  border: 1px solid #f5f5f5; /* 使用浅灰色边框，与页面背景融为一体 */
-  border-radius: 4px; /* 添加圆角 */
+  border: 1px solid #374151;
+  border-radius: 4px;
   margin: 8px;
   margin-top: 0;
+  background: #0f172a;
 }
 
 .left-panel, .right-panel {
@@ -865,7 +945,7 @@ export default {
 /* 面板部分样式 */
 .panel-section {
   padding-bottom: 1rem;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid #374151;
 }
 
 .panel-section:last-child {
@@ -876,7 +956,7 @@ export default {
 /* 进度条容器样式 */
 .progress-container {
   flex-shrink: 0;
-  border: 1px solid #f5f5f5;
+  border: 1px solid #374151;
   border-radius: 4px;
   margin: 8px;
   margin-bottom: 0;
@@ -897,12 +977,75 @@ export default {
 
 /* 加载状态样式 */
 .loading-container {
-  background-color: #f5f7fa;
+  background-color: #1f2937;
   border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* 强制所有元素正确计算大小 */
 * {
   box-sizing: border-box;
+}
+
+/* Element Plus 暗黑模式覆盖 */
+.el-button {
+  background-color: #1f2937;
+  border: 1px solid #374151;
+  color: #d1d5db;
+  transition: all 0.3s ease;
+}
+
+.el-button:hover {
+  background-color: #374151;
+  border-color: #3b82f6;
+  color: #f3f4f6;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.3);
+}
+
+.el-dialog__header {
+  background: #1f2937;
+  border-bottom: 1px solid #374151;
+}
+
+.el-dialog__title {
+  color: #3b82f6;
+}
+
+.el-dialog__body {
+  background: #111827;
+  color: #d1d5db;
+}
+
+.el-dialog__footer {
+  background: #1f2937;
+  border-top: 1px solid #374151;
+}
+
+.el-alert {
+  background: rgba(17, 24, 39, 0.9);
+  border: 1px solid #374151;
+  color: #d1d5db;
+}
+
+.el-alert__description {
+  color: #9ca3af;
+}
+
+/* 添加科技感网格线 */
+.dji-dashboard::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-image: 
+    linear-gradient(rgba(59, 130, 246, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59, 130, 246, 0.1) 1px, transparent 1px);
+  background-size: 30px 30px;
+  pointer-events: none;
+  z-index: -1;
 }
 </style>
