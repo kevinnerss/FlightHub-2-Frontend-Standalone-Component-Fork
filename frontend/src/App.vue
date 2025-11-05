@@ -39,6 +39,21 @@
       >
         告警管理
       </el-menu-item>
+      
+      <el-menu-item 
+        index="/api-test" 
+        class="tech-nav-item"
+        :style="{
+          fontSize: '16px',
+          fontWeight: '500',
+          transition: 'all 0.3s ease',
+          position: 'relative',
+          overflow: 'hidden',
+          color: '#93c5fd'
+        }"
+      >
+        接口测试工具
+      </el-menu-item>
     </el-menu>
     
     <!-- 路由视图容器 -->

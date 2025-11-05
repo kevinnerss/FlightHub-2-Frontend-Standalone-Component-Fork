@@ -5,6 +5,8 @@ const DjiDashboard = () => import('../views/DjiDashboard.vue')
 
 const AlarmManagement = () => import('../views/AlarmManagement.vue')
 
+const ApiTestPage = () => import('../views/ApiTestPage.vue')
+
 const routes = [
   {
     path: '/',
@@ -21,6 +23,15 @@ const routes = [
     component: AlarmManagement,
     meta: {
       title: '告警管理'
+    }
+  },
+
+  {
+    path: '/api-test',
+    name: 'ApiTestPage',
+    component: ApiTestPage,
+    meta: {
+      title: '接口测试工具'
     }
   }
 ]
