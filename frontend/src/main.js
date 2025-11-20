@@ -64,7 +64,7 @@ const addFilterStyles = () => {
       const statusWrapper = statusSelect.querySelector('.el-input__wrapper')
       const statusInput = statusSelect.querySelector('.el-input__inner')
       const statusIcon = statusSelect.querySelector('.el-input__suffix-inner .el-input__icon')
-      
+
       if (statusWrapper) statusWrapper.style.backgroundColor = '#0c4a6e'
       if (statusInput) statusInput.style.backgroundColor = '#0c4a6e'
       if (statusIcon) statusIcon.style.color = '#7dd3fc'
@@ -75,9 +75,9 @@ const addFilterStyles = () => {
       const waylineWrapper = waylineSelect.querySelector('.el-input__wrapper')
       const waylineInput = waylineSelect.querySelector('.el-input__inner')
       const waylineIcon = waylineSelect.querySelector('.el-input__suffix-inner .el-input__icon')
-      
+
       if (waylineWrapper) waylineWrapper.style.backgroundColor = '#0c4a6e'
-  if (waylineInput) waylineInput.style.backgroundColor = '#0c4a6e'
+      if (waylineInput) waylineInput.style.backgroundColor = '#0c4a6e'
       if (waylineIcon) waylineIcon.style.color = '#7dd3fc'
     }
   }, 0)
