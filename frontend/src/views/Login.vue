@@ -87,7 +87,7 @@
 
       <!-- 底部提示 -->
       <div class="login-footer">
-        <p>默认账号: admin / admin123</p>
+        <p>默认账号: admin / admin</p>
       </div>
     </div>
   </div>

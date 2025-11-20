@@ -50,18 +50,17 @@
 
         <!-- Cesium 3D视图 -->
         <div class="cesium-section">
-          <!-- 直接使用ref作为Cesium容器 -->
-          <div ref="cesiumContainer" class="cesium-container">
+          <div ref="cesiumWrapper" class="cesium-container">
             <!-- 加载指示器 -->
             <div v-if="loading" class="loading-overlay">
               <div class="loading-content">
                 <div class="loading-spinner"></div>
-                <span>正在加载3D模型...</span>
+                <span>正在加载模型...</span>
               </div>
             </div>
 
             <!-- 错误信息 -->
-            <div v-else-if="error" class="error-overlay">
+            <div v-if="error" class="error-overlay">
               <div class="error-content">
                 <div class="error-icon">⚠️</div>
                 <p>{{ error }}</p>
@@ -82,21 +81,21 @@
             </span>
           </div>
           <div class="panel-body alarm-panel-body">
+            <div v-if="loadingAlarms" class="loading-state">
+              <div class="loading-spinner small"></div>
+              <p>加载中...</p>
+            </div>
             <AlarmPanel 
-              v-if="selectedWayline"
+              v-else
               :alarms="getFilteredAlarms()"
-              :loading="loadingAlarms"
               @refresh="handleAlarmRefresh"
               @view-detail="handleViewAlarmDetail"
               @process-alarm="handleProcessAlarm"
             />
-            <div v-else class="dji-placeholder">
-              <p>请先选择航线查看告警信息</p>
-            </div>
           </div>
         </div>
 
-        <!-- 实时监控面板 -->
+        <!-- 实时监控 -->
         <div class="panel-section">
           <div class="panel-header">
             <h3 class="panel-title">实时监控</h3>
@@ -186,64 +185,46 @@ export default {
       alarms: [],
       loadingAlarms: false,
       showAlarmDetail: false,
-      currentAlarm: null,
-      fh2CheckTimer: null
+      currentAlarm: null
     }
   },
-  mounted() {
+  async mounted() {
     this.checkFh2Availability()
-    // 等待DOM完全渲染后再初始化Cesium
-    this.$nextTick(() => {
-      // 使用setTimeout确保布局计算完成
-      setTimeout(() => {
-        this.initCesium()
-      }, 500)
+    this.$nextTick(async () => {
+      setTimeout(async () => {
+        await this.initCesium()
+      }, 200)
     })
-  },
-  beforeUnmount() {
-    if (this.fh2CheckTimer) {
-      clearTimeout(this.fh2CheckTimer)
-      this.fh2CheckTimer = null
-    }
-    if (this.viewer) {
-      this.viewer.destroy()
-      this.viewer = null
-    }
   },
   methods: {
     checkFh2Availability() {
-      if (typeof window !== 'undefined' && window.FH2) {
+      if (typeof window.FH2 !== 'undefined') {
         this.fh2Loaded = true
-        this.fh2CheckTimer = null
-        return
+      } else {
+        this.fh2Loaded = false
+        setTimeout(() => {
+          this.checkFh2Availability()
+        }, 1000)
       }
-
-      this.fh2Loaded = false
-      this.fh2CheckTimer = setTimeout(() => {
-        this.checkFh2Availability()
-      }, 1000)
     },
     
     async initCesium() {
-      if (this.viewer) return
-
-      this.loading = true
-      this.error = ''
       try {
         const Cesium = await import('cesium')
-        Cesium.Ion.defaultAccessToken = Cesium.Ion.defaultAccessToken || ''
+        Cesium.Ion.defaultAccessToken = ''
         
-        const container = this.$refs.cesiumContainer
-        if (!container) {
-          throw new Error('找不到 Cesium 容器')
+        const wrapper = this.$refs.cesiumWrapper
+        if (!wrapper) {
+          throw new Error('找不到 cesiumWrapper 元素')
         }
         
-        const rect = container.getBoundingClientRect()
-        if (rect.width === 0 || rect.height === 0) {
-          throw new Error(`容器尺寸异常: ${rect.width}x${rect.height}`)
-        }
+        const container = document.createElement('div')
+        container.id = 'cesiumContainer'
+        container.style.width = '100%'
+        container.style.height = '100%'
+        container.style.position = 'absolute'
+        wrapper.appendChild(container)
         
-        // 直接在ref容器上创建Cesium Viewer
         this.viewer = new Cesium.Viewer(container, {
           animation: false,
           baseLayerPicker: false,
@@ -260,43 +241,17 @@ export default {
           creditContainer: document.createElement('div')
         })
         
-        // 强制resize确保canvas正确渲染
-        this.viewer.resize()
-        
-        // 加载3D Tiles模型
-        try {
-          this.tileset = await Cesium.Cesium3DTileset.fromUrl('/models/Model_0/tileset.json')
-          this.viewer.scene.primitives.add(this.tileset)
-          
-          // 等待tileset加载完成
-          await this.tileset.readyPromise
-          
-          // 自动缩放到模型并调整视角
-          await this.viewer.zoomTo(this.tileset, new Cesium.HeadingPitchRange(
-            0, // heading (朝向)
-            Cesium.Math.toRadians(-30), // pitch (俯仰角，负数向下)
-            this.tileset.boundingSphere.radius * 2.5 // range (距离)
-          ))
-          
-          // 再次resize确保显示正确
-          this.viewer.resize()
-        } catch (tilesetError) {
-          console.error('加载3D Tiles模型失败:', tilesetError)
-          // 如果模型加载失败，设置默认相机位置
-          this.viewer.camera.setView({
-            destination: Cesium.Cartesian3.fromDegrees(116.3913, 39.9075, 1000),
-            orientation: {
-              heading: Cesium.Math.toRadians(0),
-              pitch: Cesium.Math.toRadians(-30),
-              roll: 0.0
-            }
-          })
-        }
+        this.viewer.camera.setView({
+          destination: Cesium.Cartesian3.fromDegrees(116.3913, 39.9075, 1000),
+          orientation: {
+            heading: Cesium.Math.toRadians(0),
+            pitch: Cesium.Math.toRadians(-30),
+            roll: 0.0
+          }
+        })
       } catch (err) {
         this.error = '初始化Cesium失败: ' + err.message
         console.error('Cesium initialization error:', err)
-      } finally {
-        this.loading = false
       }
     },
     
@@ -352,23 +307,22 @@ export default {
       const date = new Date(timestamp)
       return date.toLocaleString('zh-CN')
     }
+  },
+  beforeUnmount() {
+    if (this.viewer) {
+      this.viewer.destroy()
+    }
   }
 }
 </script>
 
 <style scoped>
 .dashboard-premium {
-  min-height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 24px;
   padding: 24px;
-  box-sizing: border-box;
-  background: radial-gradient(circle at 20% 20%, rgba(0, 212, 255, 0.08), transparent 25%),
-              radial-gradient(circle at 80% 0, rgba(0, 153, 255, 0.06), transparent 30%),
-              #0b1024;
-  color: #e2e8f0;
-  overflow: hidden;
+  gap: 24px;
 }
 
 /* 页面头部 */
@@ -382,7 +336,6 @@ export default {
   border-radius: 16px;
   border: 1px solid rgba(0, 212, 255, 0.2);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-  flex-shrink: 0;
 }
 
 .header-icon {
@@ -425,7 +378,6 @@ export default {
   grid-template-columns: 280px 1fr 320px;
   gap: 24px;
   min-height: 0;
-  overflow: hidden;
 }
 
 /* 侧边面板 */
@@ -433,7 +385,6 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  min-height: 0;
 }
 
 .panel-section {
@@ -453,7 +404,6 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  flex-shrink: 0;
 }
 
 .panel-title {
@@ -476,7 +426,6 @@ export default {
 .panel-body {
   flex: 1;
   overflow: hidden;
-  min-height: 0;
 }
 
 .alarm-panel-body {
@@ -509,8 +458,6 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  min-height: 0;
-  overflow: hidden;
 }
 
 .progress-section {
@@ -519,7 +466,6 @@ export default {
 
 .cesium-section {
   flex: 1;
-  min-height: 500px;
   background: rgba(26, 31, 58, 0.6);
   backdrop-filter: blur(10px);
   border-radius: 16px;
@@ -558,7 +504,6 @@ export default {
   align-items: center;
   gap: 16px;
   color: #e2e8f0;
-  font-size: 16px;
 }
 
 .loading-spinner {
@@ -570,6 +515,12 @@ export default {
   animation: spin 0.8s linear infinite;
 }
 
+.loading-spinner.small {
+  width: 32px;
+  height: 32px;
+  border-width: 3px;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -578,6 +529,16 @@ export default {
 
 .error-icon {
   font-size: 48px;
+}
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  color: #94a3b8;
+  gap: 12px;
 }
 
 /* 模态框 */
@@ -720,49 +681,43 @@ export default {
 }
 
 .secondary-btn {
-  background: rgba(100, 116, 139, 0.3);
-  color: #e2e8f0;
-  border: 1px solid rgba(100, 116, 139, 0.5);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  background: rgba(100, 116, 139, 0.2);
+  color: #94a3b8;
+  border: 1px solid rgba(100, 116, 139, 0.3);
 }
 
 .secondary-btn:hover {
-  background: rgba(100, 116, 139, 0.4);
-  transform: translateY(-1px);
+  background: rgba(100, 116, 139, 0.3);
 }
 
-@media (max-width: 1180px) {
+/* Cesium容器 */
+#cesiumContainer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* 响应式 */
+@media (max-width: 1400px) {
+  .dashboard-content {
+    grid-template-columns: 250px 1fr 280px;
+  }
+}
+
+@media (max-width: 1200px) {
   .dashboard-content {
     grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr auto;
   }
-
+  
   .side-panel {
-    order: 2;
+    flex-direction: row;
   }
-
-  .main-view {
-    order: 1;
+  
+  .panel-section {
+    flex: 1;
   }
-
-  .alarm-panel-body {
-    max-height: none;
-  }
-}
-</style>
-
-<style>
-/* 强制覆盖Cesium默认样式，确保充满容器 */
-.cesium-viewer,
-.cesium-viewer-cesiumWidgetContainer,
-.cesium-widget,
-.cesium-widget canvas {
-  width: 100% !important;
-  height: 100% !important;
-  position: absolute !important;
-  top: 0 !important;
-  left: 0 !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  overflow: hidden !important;
 }
 </style>
