@@ -1,5 +1,5 @@
 # dji_command_root/dji_command_root/settings.py
-
+import  os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -13,7 +13,8 @@ SECRET_KEY = "django-insecure-$^vuuj6l7%#76l-=k!hx#bynkr4h84@8ck&f7bph$=$dq*6qf6
 DEBUG = True
 
 ALLOWED_HOSTS = ['*']
-
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # Application definition
 
 INSTALLED_APPS = [
