@@ -2,7 +2,7 @@ import axios from 'axios'
 
 // 创建axios实例
 const api = axios.create({
-  baseURL: '/api/v1',
+  baseURL: process.env.VUE_APP_API_BASE_URL || '/api/v1',
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json'
@@ -43,7 +43,7 @@ export default {
       throw error
     }
   },
-  
+
   // 获取单个航线详情
   async getWaylineDetail(waylineId) {
     try {
@@ -54,7 +54,7 @@ export default {
       throw error
     }
   },
-  
+
   // 创建新航线
   async createWayline(waylineData) {
     try {
@@ -65,7 +65,7 @@ export default {
       throw error
     }
   },
-  
+
   // 更新航线
   async updateWayline(waylineId, waylineData) {
     try {
@@ -76,7 +76,7 @@ export default {
       throw error
     }
   },
-  
+
   // 部分更新航线
   async patchWayline(waylineId, waylineData) {
     try {
@@ -87,7 +87,7 @@ export default {
       throw error
     }
   },
-  
+
   // 删除航线
   async deleteWayline(waylineId) {
     try {

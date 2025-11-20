@@ -1,4 +1,5 @@
 from django.db import models
+from django.contrib.auth.models import AbstractUser
 
 
 class Wayline(models.Model):
@@ -142,3 +143,27 @@ class Alarm(models.Model):
 
     def __str__(self):
         return f"Alarm {self.id} - {self.category.name}"
+
+
+class UserProfile(models.Model):
+    """用户扩展信息表"""
+    user = models.OneToOneField(
+        'auth.User', 
+        on_delete=models.CASCADE, 
+        related_name='profile', 
+        verbose_name='关联用户'
+    )
+    name = models.CharField(max_length=100, verbose_name="真实姓名")
+    role = models.CharField(max_length=20, default='user', verbose_name="角色")  # admin/user
+    
+    # 时间戳
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+    
+    class Meta:
+        verbose_name = "用户信息"
+        verbose_name_plural = "用户信息"
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"用户 {self.user.username} - {self.name}"

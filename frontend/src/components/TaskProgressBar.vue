@@ -1,23 +1,34 @@
 <template>
-  <div class="task-progress-bar tech-border">
+  <div class="task-progress-premium">
+    <!-- 任务信息 -->
     <div class="progress-header">
       <div class="task-info">
         <span class="task-name">{{ currentTask || '暂无任务' }}</span>
-        <span class="task-stats">{{ completedTasks }}/{{ totalTasks }} 个任务已完成</span>
+        <span class="task-stats">{{ completedTasks }} / {{ totalTasks }} 个任务已完成</span>
       </div>
       <div class="time-info">
-        <i class="el-icon-timer"></i>
-        <span>剩余时间: {{ remainingTime || '--:--' }}</span>
+        <span class="time-icon">⏱️</span>
+        <span>{{ remainingTime || '--:--' }}</span>
       </div>
     </div>
-    <div class="progress-container tech-border-light">
-      <el-progress 
-        :percentage="progress" 
-        :stroke-width="20" 
-        :text-inside="true"
-        :color="progressColors"
-        :show-text="true"
-        class="tech-progress"
+    
+    <!-- 进度条 -->
+    <div class="progress-bar-container">
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" :style="{ width: progress + '%' }">
+          <div class="progress-glow"></div>
+        </div>
+      </div>
+      <div class="progress-text">{{ progress }}%</div>
+    </div>
+    
+    <!-- 进度指示器 -->
+    <div class="progress-indicators">
+      <div 
+        v-for="index in totalTasks" 
+        :key="index" 
+        class="indicator" 
+        :class="{ completed: index <= completedTasks, active: index === completedTasks + 1 }"
       />
     </div>
   </div>
@@ -47,150 +58,183 @@ export default {
       type: Number,
       default: 0
     }
-  },
-  computed: {
-    // 根据进度值生成颜色渐变
-    progressColors() {
-      // Element Plus 的 color 属性需要数组格式
-      return [
-        { color: '#3b82f6', percentage: 0 },  // 蓝色 - 初始
-        { color: '#10b981', percentage: 50 }, // 绿色 - 中间
-        { color: '#10b981', percentage: 100 } // 绿色 - 完成
-      ]
-    }
   }
 }
 </script>
 
 <style scoped>
-.task-progress-bar {
-  padding: 15px;
-  background: #1f2937;
-  border-radius: 4px;
-  position: relative;
-  overflow: hidden;
+.task-progress-premium {
+  background: rgba(26, 31, 58, 0.6);
+  backdrop-filter: blur(10px);
+  border-radius: 12px;
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  padding: 20px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
-/* 科技感背景 */
-.task-progress-bar::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(45deg, rgba(59, 130, 246, 0.1) 25%, transparent 25%, transparent 50%, rgba(59, 130, 246, 0.1) 50%, rgba(59, 130, 246, 0.1) 75%, transparent 75%, transparent);
-  background-size: 10px 10px;
-  z-index: 0;
-}
-
-.task-progress-bar > * {
-  position: relative;
-  z-index: 1;
-}
-
+/* 进度头部 */
 .progress-header {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 10px;
-  font-size: 14px;
+  align-items: flex-start;
+  margin-bottom: 16px;
 }
 
 .task-info {
   display: flex;
   flex-direction: column;
+  gap: 6px;
+  flex: 1;
 }
 
 .task-name {
-  font-weight: bold;
-  margin-bottom: 4px;
-  color: #93c5fd;
-  text-shadow: 0 0 5px rgba(59, 130, 246, 0.5);
+  font-size: 16px;
+  font-weight: 700;
+  color: #00d4ff;
+  text-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
 }
 
 .task-stats {
-  color: #9ca3af;
-  font-size: 12px;
+  font-size: 13px;
+  color: #94a3b8;
 }
 
 .time-info {
   display: flex;
   align-items: center;
-  color: #d1d5db;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(0, 212, 255, 0.1);
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  border-radius: 8px;
+  color: #00d4ff;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: 'Courier New', monospace;
 }
 
-.time-info i {
-  margin-right: 5px;
-  color: #3b82f6;
+.time-icon {
+  font-size: 16px;
 }
 
-.progress-container {
-  width: 100%;
-  background: #111827;
-  padding: 8px;
-  border-radius: 4px;
+/* 进度条容器 */
+.progress-bar-container {
+  position: relative;
+  margin-bottom: 16px;
+}
+
+.progress-bar-bg {
+  height: 32px;
+  background: rgba(10, 14, 39, 0.8);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  border-radius: 16px;
+  overflow: hidden;
+  position: relative;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00d4ff 0%, #0099ff 50%, #00d4ff 100%);
+  background-size: 200% 100%;
+  border-radius: 16px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   overflow: hidden;
-}
-
-.progress-container::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.1), transparent);
-  animation: shimmer 2s infinite;
+  animation: shimmer 2s linear infinite;
+  box-shadow: 
+    0 0 20px rgba(0, 212, 255, 0.4),
+    inset 0 0 20px rgba(255, 255, 255, 0.2);
 }
 
 @keyframes shimmer {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 
-/* Element Plus 进度条样式覆盖 */
-:deep(.el-progress-bar__outer) {
-  background-color: #374151;
-  border: 1px solid #4b5563;
-  border-radius: 10px;
-  overflow: hidden;
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.3) inset;
-}
-
-:deep(.el-progress-bar__inner) {
-  border-radius: 10px;
-  background: linear-gradient(90deg, #3b82f6, #10b981);
-  box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
-  transition: width 0.6s ease;
-}
-
-:deep(.el-progress__text) {
-  color: #ffffff;
-  font-weight: 500;
-  text-shadow: 0 0 2px rgba(59, 130, 246, 0.8);
-}
-
-/* 科技感进度条边框 */
-.tech-progress {
-  position: relative;
-}
-
-.tech-progress::before {
-  content: '';
+.progress-glow {
   position: absolute;
-  top: -2px;
-  left: -2px;
-  right: -2px;
-  bottom: -2px;
-  border-radius: 12px;
-  background: linear-gradient(45deg, #3b82f6, transparent, #3b82f6);
-  z-index: -1;
-  animation: borderGlow 2s linear infinite;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  animation: glow 2s linear infinite;
 }
 
-@keyframes borderGlow {
-  0% { background-position: 0 0; }
-  100% { background-position: 100px 100px; }
+@keyframes glow {
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 200%;
+  }
+}
+
+.progress-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+/* 进度指示器 */
+.progress-indicators {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+}
+
+.indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(100, 116, 139, 0.3);
+  border: 1px solid rgba(100, 116, 139, 0.5);
+  transition: all 0.3s ease;
+}
+
+.indicator.completed {
+  background: linear-gradient(135deg, #00d4ff 0%, #0099ff 100%);
+  border-color: #00d4ff;
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.6);
+}
+
+.indicator.active {
+  background: linear-gradient(135deg, #00d4ff 0%, #0099ff 100%);
+  border-color: #00d4ff;
+  box-shadow: 0 0 12px rgba(0, 212, 255, 0.8);
+  animation: activePulse 1.5s ease-in-out infinite;
+  transform: scale(1.3);
+}
+
+@keyframes activePulse {
+  0%, 100% {
+    box-shadow: 0 0 12px rgba(0, 212, 255, 0.8);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(0, 212, 255, 1);
+  }
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+  .progress-header {
+    flex-direction: column;
+    gap: 12px;
+  }
+  
+  .time-info {
+    align-self: flex-start;
+  }
 }
 </style>

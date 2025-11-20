@@ -42,20 +42,20 @@ const addFilterStyles = () => {
     // 查找并应用样式到所有筛选框
     const selectWrappers = document.querySelectorAll('.search-filters .el-select .el-input__wrapper')
     selectWrappers.forEach(wrapper => {
-      wrapper.style.backgroundColor = '#1f2937'
-      wrapper.style.borderColor = '#374151'
+      wrapper.style.backgroundColor = '#0c4a6e'
+      wrapper.style.borderColor = '#0ea5e9'
       wrapper.style.boxShadow = 'none'
     })
 
     const inputInners = document.querySelectorAll('.search-filters .el-select .el-input__inner')
     inputInners.forEach(input => {
-      input.style.backgroundColor = '#1f2937'
-      input.style.color = '#d1d5db'
+      input.style.backgroundColor = '#0c4a6e'
+      input.style.color = '#e0f2fe'
     })
 
     const icons = document.querySelectorAll('.search-filters .el-select .el-input__suffix-inner .el-input__icon')
     icons.forEach(icon => {
-      icon.style.color = '#9ca3af'
+      icon.style.color = '#7dd3fc'
     })
 
     // 特别处理已在DOM中的筛选框
@@ -65,9 +65,9 @@ const addFilterStyles = () => {
       const statusInput = statusSelect.querySelector('.el-input__inner')
       const statusIcon = statusSelect.querySelector('.el-input__suffix-inner .el-input__icon')
       
-      if (statusWrapper) statusWrapper.style.backgroundColor = '#1f2937'
-      if (statusInput) statusInput.style.backgroundColor = '#1f2937'
-      if (statusIcon) statusIcon.style.color = '#9ca3af'
+      if (statusWrapper) statusWrapper.style.backgroundColor = '#0c4a6e'
+      if (statusInput) statusInput.style.backgroundColor = '#0c4a6e'
+      if (statusIcon) statusIcon.style.color = '#7dd3fc'
     }
 
     const waylineSelect = document.getElementById('alarm-wayline-select')
@@ -76,37 +76,37 @@ const addFilterStyles = () => {
       const waylineInput = waylineSelect.querySelector('.el-input__inner')
       const waylineIcon = waylineSelect.querySelector('.el-input__suffix-inner .el-input__icon')
       
-      if (waylineWrapper) waylineWrapper.style.backgroundColor = '#1f2937'
-      if (waylineInput) waylineInput.style.backgroundColor = '#1f2937'
-      if (waylineIcon) waylineIcon.style.color = '#9ca3af'
+      if (waylineWrapper) waylineWrapper.style.backgroundColor = '#0c4a6e'
+  if (waylineInput) waylineInput.style.backgroundColor = '#0c4a6e'
+      if (waylineIcon) waylineIcon.style.color = '#7dd3fc'
     }
   }, 0)
 }
 
 console.log('Vue 应用创建完成')
 
-// 使用插件 - 通过Element Plus配置选项修改主题
+// 通过Element Plus配置选项修改主题
 app.use(ElementPlus, {
   size: 'default',
   zIndex: 3000,
   // 通过配置修改全局样式
   cssVars: {
     // 全局颜色变量
-    'el-color-primary': '#3b82f6',
+    'el-color-primary': '#0ea5e9',
     'el-color-success': '#10b981',
     'el-color-warning': '#f59e0b',
     'el-color-danger': '#ef4444',
-    'el-color-info': '#64748b',
+    'el-color-info': '#0891b2',
     // 输入框样式
-    'el-input-bg-color': '#1f2937',
-    'el-input-text-color': '#d1d5db',
-    'el-input-border-color': '#374151',
+    'el-input-bg-color': '#0c4a6e',
+    'el-input-text-color': '#e0f2fe',
+    'el-input-border-color': '#0ea5e9',
     // 下拉选择框样式
-    'el-select-dropdown-bg-color': '#1f2937',
-    'el-select-dropdown-border-color': '#374151',
-    'el-select-dropdown-item-color': '#d1d5db',
-    'el-select-dropdown-item-hover-bg-color': '#374151',
-    'el-select-dropdown-item-selected-bg-color': '#1e3a8a'
+    'el-select-dropdown-bg-color': '#0c4a6e',
+    'el-select-dropdown-border-color': '#0ea5e9',
+    'el-select-dropdown-item-color': '#e0f2fe',
+    'el-select-dropdown-item-hover-bg-color': '#0891b2',
+    'el-select-dropdown-item-selected-bg-color': '#0891b2'
   }
 })
 

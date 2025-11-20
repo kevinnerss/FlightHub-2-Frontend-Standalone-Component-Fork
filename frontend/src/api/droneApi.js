@@ -1,8 +1,9 @@
+
 import axios from 'axios'
 
 // 创建axios实例
 const api = axios.create({
-  baseURL: '/api/v1',
+  baseURL: process.env.VUE_APP_API_BASE_URL || '/api/v1',
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json'
@@ -145,7 +146,7 @@ export default {
       return mockData.routes
     }
   },
-  
+
   // 获取任务数据
   async getTaskData() {
     try {
@@ -156,13 +157,13 @@ export default {
       return mockData.taskData
     }
   },
-  
+
   // 获取报警列表
   async getAlarms() {
     try {
       // 使用真实API获取告警数据
       const response = await api.get('/alarms/')
-      
+
       // 转换数据格式以匹配前端组件的期望格式
       const alarms = response.map(alarm => ({
         id: alarm.id,
@@ -171,18 +172,18 @@ export default {
         timestamp: alarm.created_at,
         location: `坐标(${alarm.latitude}, ${alarm.longitude})`,
         type: alarm.category_details.name,
-        severity: alarm.status === 'PENDING' ? '高' : 
-                  alarm.status === 'PROCESSING' ? '中' : '低',
+        severity: alarm.status === 'PENDING' ? '高' :
+          alarm.status === 'PROCESSING' ? '中' : '低',
         imageUrl: alarm.image_url || ''
       }))
-      
+
       return alarms
     } catch (error) {
       console.error('获取报警列表失败，使用模拟数据:', error)
       return mockData.alarms
     }
   },
-  
+
   // 获取无人机状态
   async getDroneStatus() {
     try {
@@ -193,7 +194,7 @@ export default {
       return mockData.droneStatus
     }
   },
-  
+
   // 处理报警
   async processAlarm(alarmId) {
     try {
@@ -208,7 +209,7 @@ export default {
       throw error
     }
   },
-  
+
   // 控制无人机
   async controlDrone(action) {
     try {
@@ -220,7 +221,7 @@ export default {
       throw error
     }
   },
-  
+
   // 更新高度
   async updateAltitude(altitude) {
     try {
@@ -232,7 +233,7 @@ export default {
       throw error
     }
   },
-  
+
   // 更新速度
   async updateSpeed(speed) {
     try {
@@ -244,7 +245,7 @@ export default {
       throw error
     }
   },
-  
+
   // 紧急停止
   async emergencyStop() {
     try {

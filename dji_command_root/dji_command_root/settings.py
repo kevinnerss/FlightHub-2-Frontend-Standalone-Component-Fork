@@ -28,10 +28,14 @@ INSTALLED_APPS = [
 
     'dji_command_root',  # 最终修正！统一的项目配置包名称
     'rest_framework',
+    'rest_framework.authtoken',
     'django_filters',
     'corsheaders',
     'telemetry_app',
 ]
+
+# 使用Django默认的用户模型
+# AUTH_USER_MODEL已移除，使用auth.User
 
 # 中间件 (已按 Admin 和 CORS 的要求调整了顺序)
 MIDDLEWARE = [
@@ -96,8 +100,12 @@ AUTH_PASSWORD_VALIDATORS = [
 
 # CORS 配置
 CORS_ALLOWED_ORIGINS = [
+    "http://localhost:8081",
+    "http://127.0.0.1:8081",
     "http://localhost:8082",
     "http://127.0.0.1:8082",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
 ]
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_METHODS = [
@@ -112,6 +120,13 @@ CORS_ALLOW_HEADERS = [
 REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 10,
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.TokenAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticatedOrReadOnly',
+    ],
     'DEFAULT_FILTER_BACKENDS': [
         'django_filters.rest_framework.DjangoFilterBackend',
         'rest_framework.filters.SearchFilter',

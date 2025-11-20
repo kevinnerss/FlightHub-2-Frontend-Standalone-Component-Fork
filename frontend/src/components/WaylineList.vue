@@ -1,29 +1,37 @@
 <template>
-  <div class="wayline-list-container tech-border">
-    <div class="header-actions">
-      <!-- <h2 class="title">航线列表</h2> -->
+  <div class="wayline-list-premium">
+    <!-- 航线列表头部 -->
+    <div class="list-header">
+      <h3 class="list-title">航线列表</h3>
+      <span v-if="waylines.length > 0" class="wayline-count">{{ waylines.length }}</span>
     </div>
     
-    <!-- 航线列表 -->
-    <el-table
-      v-loading="loading"
-      :data="waylines"
-      style="width: 100%"
-      border
-      empty-text="暂无航线数据"
-      :fit="true"
-      :row-class-name="tableRowClassName"
-      @row-click="handleRowClick"
-      class="tech-table"
-    >
-      <el-table-column prop="id" label="ID" min-width="60" />
-      <el-table-column prop="name" label="航线名称" min-width="180" show-overflow-tooltip />
-      <el-table-column prop="estimated_duration" label="预计时间(秒)" min-width="120">
-        <template #default="{row}">
-          {{ row?.estimated_duration || '-' }}
-        </template>
-      </el-table-column>
-    </el-table>
+    <!-- 航线项列表 -->
+    <div class="wayline-items" v-loading="loading">
+      <div v-if="waylines.length === 0" class="empty-state">
+        <div class="empty-icon">📍</div>
+        <p>暂无航线</p>
+      </div>
+      
+      <div 
+        v-else
+        v-for="wayline in waylines" 
+        :key="wayline.id"
+        class="wayline-item"
+        :class="{ selected: wayline.id === currentSelectedId }"
+        @click="handleSelect(wayline)"
+      >
+        <div class="wayline-item-header">
+          <span class="wayline-id">ID: {{ wayline.id }}</span>
+          <span class="wayline-duration" v-if="wayline.estimated_duration">
+            <span class="duration-icon">⏱️</span>
+            {{ formatDuration(wayline.estimated_duration) }}
+          </span>
+        </div>
+        <div class="wayline-name">{{ wayline.name }}</div>
+        <div class="select-indicator"></div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -53,87 +61,24 @@ export default {
       this.loading = true
       try {
         const response = await waylineApi.getWaylines({})
-        
-        // 转换数据格式，只保留需要的字段
         this.waylines = (response?.results || []).map(wayline => ({
           id: wayline.id,
           name: wayline.name,
           estimated_duration: wayline.estimated_duration
         }))
         
-        // 如果有航线数据且没有选中的航线，默认选择第一条
         if (this.waylines.length > 0 && !this.currentSelectedId) {
           this.$emit('wayline-selected', this.waylines[0])
         }
       } catch (error) {
-        this.$message.error('获取航线列表失败，显示模拟数据')
         console.error('Load waylines error:', error)
-        
-        // 使用模拟数据，确保页面功能正常
-        let mockWaylines = [
-          {
-            id: 1,
-            wayline_id: 'WL001',
-            name: '电力巡检航线一',
-            description: '110kV输电线路常规巡检',
-            waypoints: [{lat: 39.9042, lng: 116.4074}, {lat: 39.9142, lng: 116.4174}],
-            length: 1250.5,
-            estimated_duration: 300,
-            status: 'ACTIVE',
-            created_by: 'admin',
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          },
-          {
-            id: 2,
-            wayline_id: 'WL002',
-            name: '桥梁检测航线',
-            description: '大跨度桥梁结构安全检测',
-            waypoints: [{lat: 39.9242, lng: 116.4274}, {lat: 39.9342, lng: 116.4374}],
-            length: 850.3,
-            estimated_duration: 180,
-            status: 'DRAFT',
-            created_by: 'user1',
-            created_at: new Date(Date.now() - 86400000).toISOString(),
-            updated_at: new Date(Date.now() - 86400000).toISOString()
-          },
-          {
-            id: 3,
-            wayline_id: 'WL003',
-            name: '河道巡查航线',
-            description: '城市河道水质监测与垃圾巡查',
-            waypoints: [{lat: 39.9442, lng: 116.4474}, {lat: 39.9542, lng: 116.4574}],
-            length: 2100.8,
-            estimated_duration: 420,
-            status: 'ARCHIVED',
-            created_by: 'admin',
-            created_at: new Date(Date.now() - 172800000).toISOString(),
-            updated_at: new Date(Date.now() - 172800000).toISOString()
-          }
+        // 使用模拟数据
+        this.waylines = [
+          { id: 1, name: '电力巡检航线一', estimated_duration: 300 },
+          { id: 2, name: '桥梁检测航线', estimated_duration: 180 },
+          { id: 3, name: '河道巡查航线', estimated_duration: 420 }
         ]
         
-        // 当API调用失败时，在前端进行模拟过滤
-        if (this.searchQuery) {
-          const query = this.searchQuery.toLowerCase()
-          mockWaylines = mockWaylines.filter(wayline => 
-            wayline.name.toLowerCase().includes(query) ||
-            wayline.wayline_id.toLowerCase().includes(query) ||
-            (wayline.description && wayline.description.toLowerCase().includes(query))
-          )
-        }
-        
-        if (this.statusFilter) {
-          mockWaylines = mockWaylines.filter(wayline => wayline.status === this.statusFilter)
-        }
-        
-        // 简化模拟数据，只保留需要的字段
-        this.waylines = mockWaylines.map(wayline => ({
-          id: wayline.id,
-          name: wayline.name,
-          estimated_duration: wayline.estimated_duration
-        }))
-        
-        // 如果有航线数据且没有选中的航线，默认选择第一条
         if (this.waylines.length > 0 && !this.currentSelectedId) {
           this.$emit('wayline-selected', this.waylines[0])
         }
@@ -142,84 +87,220 @@ export default {
       }
     },
     
-    // 行点击事件处理
-    handleRowClick(row) {
-      this.$emit('wayline-selected', row)
+    handleSelect(wayline) {
+      this.$emit('wayline-selected', wayline)
     },
     
-    // 为选中的行添加特殊样式
-    tableRowClassName({row}) {
-      return row.id === this.currentSelectedId ? 'selected-row' : ''
+    formatDuration(seconds) {
+      const minutes = Math.floor(seconds / 60)
+      const secs = seconds % 60
+      return `${minutes}:${secs.toString().padStart(2, '0')}`
     }
   }
 }
 </script>
 
 <style scoped>
-.wayline-list-container {
-  padding: 10px;
-  background: #1f2937;
-  border-radius: 4px;
-  width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
-  color: #d1d5db;
+.wayline-list-premium {
+  background: rgba(26, 31, 58, 0.6);
+  backdrop-filter: blur(10px);
+  border-radius: 12px;
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  overflow: hidden;
 }
 
-.header-actions {
-  margin-bottom: 15px;
+/* 列表头部 */
+.list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.15) 0%, rgba(0, 153, 255, 0.15) 100%);
+  border-bottom: 1px solid rgba(0, 212, 255, 0.2);
 }
 
-.title {
-  margin: 0;
-  color: #3b82f6;
+.list-title {
   font-size: 16px;
+  font-weight: 700;
+  color: #00d4ff;
+  margin: 0;
 }
 
-/* 为选中的行添加特殊样式 */
-:deep(.el-table__row.selected-row) {
-  background-color: #1e3a8a !important;
+.wayline-count {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 8px;
+  background: linear-gradient(135deg, #00d4ff 0%, #0099ff 100%);
+  border-radius: 12px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(0, 212, 255, 0.4);
 }
 
-:deep(.el-table__row.selected-row:hover) {
-  background-color: #1e40af !important;
+/* 航线项容器 */
+.wayline-items {
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 12px;
 }
 
-/* Element Plus 表格暗黑金属风格覆盖 */
-:deep(.el-table) {
-  --el-table-header-bg-color: #1f2937;
-  --el-table-header-text-color: #93c5fd;
-  --el-table-row-hover-bg-color: #1e3a8a;
-  --el-table-border-color: #374151;
-  --el-table-text-color-primary: #d1d5db;
-  --el-table-bg-color: #1f2937;
-  --el-table-empty-text-color: #9ca3af;
-  border: 1px solid #374151;
-  box-shadow: 0 0 10px rgba(59, 130, 246, 0.2);
+/* 自定义滚动条 */
+.wayline-items::-webkit-scrollbar {
+  width: 6px;
 }
 
-:deep(.el-table__header-wrapper th) {
-  border-bottom: 1px solid #374151;
-  color: #93c5fd;
-  font-weight: 500;
+.wayline-items::-webkit-scrollbar-track {
+  background: rgba(10, 14, 39, 0.4);
+  border-radius: 3px;
 }
 
-:deep(.el-table__body-wrapper td) {
-  border-bottom: 1px solid #374151;
-  color: #d1d5db;
+.wayline-items::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #00d4ff 0%, #0099ff 100%);
+  border-radius: 3px;
 }
 
-:deep(.el-table__body-wrapper tr:not(.selected-row)) {
-  background-color: #1f2937;
+/* 空状态 */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  color: #64748b;
 }
 
-:deep(.el-table__body-wrapper tr:not(.selected-row):hover) {
-  background-color: #1e3a8a;
+.empty-icon {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 212, 255, 0.1);
+  border: 2px solid rgba(0, 212, 255, 0.3);
+  border-radius: 50%;
+  font-size: 32px;
+  margin-bottom: 16px;
 }
 
-/* 科技感表格边框 */
-.tech-table {
-  border: 1px solid #374151;
-  box-shadow: 0 0 10px rgba(59, 130, 246, 0.2);
+.empty-state p {
+  margin: 0;
+  font-size: 14px;
+}
+
+/* 航线项 */
+.wayline-item {
+  position: relative;
+  padding: 14px 16px;
+  margin-bottom: 8px;
+  background: rgba(10, 14, 39, 0.6);
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.wayline-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(135deg, #00d4ff 0%, #0099ff 100%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.wayline-item:hover {
+  border-color: rgba(0, 212, 255, 0.4);
+  background: rgba(10, 14, 39, 0.8);
+  transform: translateX(4px);
+}
+
+.wayline-item:hover::before {
+  opacity: 1;
+}
+
+.wayline-item.selected {
+  border-color: #00d4ff;
+  background: rgba(0, 212, 255, 0.15);
+  box-shadow: 0 4px 16px rgba(0, 212, 255, 0.3);
+}
+
+.wayline-item.selected::before {
+  opacity: 1;
+  width: 4px;
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.8);
+}
+
+.wayline-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.wayline-id {
+  font-size: 12px;
+  color: #94a3b8;
+  font-family: 'Courier New', monospace;
+}
+
+.wayline-duration {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #00d4ff;
+  font-family: 'Courier New', monospace;
+}
+
+.duration-icon {
+  font-size: 14px;
+}
+
+.wayline-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e2e8f0;
+  line-height: 1.4;
+}
+
+.wayline-item.selected .wayline-name {
+  color: #00d4ff;
+}
+
+.select-indicator {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(0, 212, 255, 0.3);
+  opacity: 0;
+  transition: all 0.3s ease;
+}
+
+.wayline-item.selected .select-indicator {
+  opacity: 1;
+  background: #00d4ff;
+  box-shadow: 0 0 10px rgba(0, 212, 255, 0.8);
+  animation: selectPulse 2s ease-in-out infinite;
+}
+
+@keyframes selectPulse {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(0, 212, 255, 0.8);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(0, 212, 255, 1);
+  }
 }
 </style>

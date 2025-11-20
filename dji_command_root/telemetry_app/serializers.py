@@ -1,5 +1,8 @@
 from rest_framework import serializers
-from .models import Alarm, AlarmCategory, Wayline  # 导入新的 AlarmCategory 和 Wayline
+from .models import Alarm, AlarmCategory, Wayline, UserProfile  # 导入新的 AlarmCategory 和 Wayline
+from django.contrib.auth.models import User
+from django.contrib.auth import authenticate
+from rest_framework.authtoken.models import Token
 
 
 # --- 1. 航线序列化器 --- 移到前面以避免循环引用问题
@@ -106,3 +109,115 @@ class AlarmSerializer(serializers.ModelSerializer):
             'category': {'write_only': True, 'required': True}  # 类别关联是必须的
             # wayline不再需要额外的write_only配置，DRF会处理好读写关系
         }
+
+
+class UserSerializer(serializers.ModelSerializer):
+    """用户信息序列化器"""
+    name = serializers.CharField(required=False)
+    role = serializers.CharField(required=False)
+    password = serializers.CharField(write_only=True, required=False)
+    
+    class Meta:
+        model = User
+        fields = ('id', 'username', 'name', 'role', 'is_active', 'date_joined', 'password')
+        read_only_fields = ('date_joined',)
+    
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        if hasattr(instance, 'profile'):
+            ret['name'] = instance.profile.name
+            ret['role'] = instance.profile.role
+        else:
+            ret['name'] = instance.username
+            ret['role'] = 'user'
+        # 添加createdAt字段以匹配前端期望
+        ret['createdAt'] = instance.date_joined
+        return ret
+
+    def update(self, instance, validated_data):
+        # 更新密码
+        password = validated_data.pop('password', None)
+        if password:
+            instance.set_password(password)
+        
+        # 更新基本信息
+        if 'username' in validated_data:
+            instance.username = validated_data['username']
+        
+        instance.save()
+        
+        # 更新扩展信息
+        name = validated_data.get('name')
+        role = validated_data.get('role')
+        
+        if name or role:
+            profile, created = UserProfile.objects.get_or_create(user=instance)
+            if name:
+                profile.name = name
+            if role:
+                profile.role = role
+            profile.save()
+            
+        return instance
+
+
+class UserCreateSerializer(serializers.ModelSerializer):
+    """用户创建序列化器，包含密码设置"""
+    password = serializers.CharField(write_only=True, required=True)
+    name = serializers.CharField(write_only=True, required=True)
+    role = serializers.CharField(write_only=True, default='user')
+    
+    class Meta:
+        model = User
+        fields = ('username', 'name', 'password', 'role')
+    
+    def create(self, validated_data):
+        name = validated_data.pop('name')
+        role = validated_data.pop('role')
+        password = validated_data.pop('password')
+        
+        user = User.objects.create_user(
+            username=validated_data['username'],
+            password=password
+        )
+        
+        # 创建用户扩展信息
+        UserProfile.objects.create(
+            user=user,
+            name=name,
+            role=role
+        )
+        
+        return user
+
+
+class LoginSerializer(serializers.Serializer):
+    """登录序列化器"""
+    username = serializers.CharField()
+    password = serializers.CharField(write_only=True)
+    
+    def validate(self, data):
+        username = data.get('username')
+        password = data.get('password')
+        
+        if username and password:
+            user = authenticate(username=username, password=password)
+            
+            if not user:
+                raise serializers.ValidationError('用户名或密码错误')
+            
+            if not user.is_active:
+                raise serializers.ValidationError('用户已被禁用')
+            
+            data['user'] = user
+            return data
+        raise serializers.ValidationError('用户名或密码错误')
+
+
+class TokenSerializer(serializers.ModelSerializer):
+    """Token序列化器"""
+    user = UserSerializer(read_only=True)
+    
+    class Meta:
+        model = Token
+        fields = ('key', 'user')

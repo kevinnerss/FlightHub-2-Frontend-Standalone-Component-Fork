@@ -2,69 +2,69 @@
 
 /* 最高优先级的选择器组合 */
 html body #app .search-filters .el-select .el-input__wrapper {
-  background-color: #1f2937 !important;
-  border: 1px solid #374151 !important;
+  background-color: #0c4a6e !important;
+  border: 1px solid #0ea5e9 !important;
   box-shadow: none !important;
-  color: #d1d5db !important;
+  color: #e0f2fe !important;
 }
 
 html body #app .search-filters .el-select .el-input__inner {
-  background-color: #1f2937 !important;
-  color: #d1d5db !important;
+  background-color: #0c4a6e !important;
+  color: #e0f2fe !important;
 }
 
 html body #app .search-filters .el-select .el-input__suffix-inner .el-input__icon {
-  color: #9ca3af !important;
+  color: #7dd3fc !important;
 }
 
 /* 特定ID选择器确保最高优先级 */
 html body #app #alarm-status-select .el-input__wrapper {
-  background-color: #1f2937 !important;
-  border: 1px solid #374151 !important;
+  background-color: #0c4a6e !important;
+  border: 1px solid #0ea5e9 !important;
 }
 
 html body #app #alarm-status-select .el-input__inner {
-  background-color: #1f2937 !important;
-  color: #d1d5db !important;
+  background-color: #0c4a6e !important;
+  color: #e0f2fe !important;
 }
 
 html body #app #alarm-wayline-select .el-input__wrapper {
-  background-color: #1f2937 !important;
-  border: 1px solid #374151 !important;
+  background-color: #0c4a6e !important;
+  border: 1px solid #0ea5e9 !important;
 }
 
 html body #app #alarm-wayline-select .el-input__inner {
-  background-color: #1f2937 !important;
-  color: #d1d5db !important;
+  background-color: #0c4a6e !important;
+  color: #e0f2fe !important;
 }
 
 /* 下拉菜单样式 */
 html body .el-select-dropdown {
-  background-color: #1f2937 !important;
-  border: 1px solid #374151 !important;
+  background-color: #0c4a6e !important;
+  border: 1px solid #0ea5e9 !important;
 }
 
 html body .el-select-dropdown__item {
-  color: #d1d5db !important;
+  color: #e0f2fe !important;
 }
 
 html body .el-select-dropdown__item:hover {
-  background-color: #374151 !important;
-  color: #93c5fd !important;
+  background-color: #0891b2 !important;
+  color: #bae6fd !important;
 }
 
 html body .el-select-dropdown__item.selected {
-  background-color: #1e3a8a !important;
-  color: #93c5fd !important;
+  background-color: #0891b2 !important;
+  color: #bae6fd !important;
 }
 
 /* 确保所有状态下的样式一致性 */
 html body .el-select:focus-within .el-input__wrapper {
-  background-color: #1f2937 !important;
-  border-color: #4f46e5 !important;
-  box-shadow: 0 0 0 1px rgba(79, 70, 229, 0.1) !important;
+  background-color: #0c4a6e !important;
+  border-color: #0ea5e9 !important;
+  box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.2) !important;
 }
 
 html body .el-select:hover .el-input__wrapper {
-  border-color: #4f46e5 !important;
+  border-color: #0ea5e9 !important;
 }

@@ -2,7 +2,7 @@ import axios from 'axios'
 
 // 创建axios实例
 const api = axios.create({
-  baseURL: '/api/v1',
+  baseURL: process.env.VUE_APP_API_BASE_URL || '/api/v1',
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json'
@@ -43,7 +43,7 @@ export default {
       throw error
     }
   },
-  
+
   // 获取航线列表
   async getWaylines(params = {}) {
     try {
@@ -54,7 +54,7 @@ export default {
       throw error
     }
   },
-  
+
   // 获取单个告警详情
   async getAlarmDetail(alarmId) {
     try {
@@ -65,7 +65,7 @@ export default {
       throw error
     }
   },
-  
+
   // 创建新告警
   async createAlarm(alarmData) {
     try {
@@ -76,7 +76,7 @@ export default {
       throw error
     }
   },
-  
+
   // 更新告警
   async updateAlarm(alarmId, alarmData) {
     try {
@@ -87,7 +87,7 @@ export default {
       throw error
     }
   },
-  
+
   // 部分更新告警（如状态）
   async patchAlarm(alarmId, alarmData) {
     try {
@@ -98,7 +98,7 @@ export default {
       throw error
     }
   },
-  
+
   // 删除告警
   async deleteAlarm(alarmId) {
     try {
@@ -109,7 +109,7 @@ export default {
       throw error
     }
   },
-  
+
   // 获取告警类型列表
   async getAlarmCategories() {
     try {

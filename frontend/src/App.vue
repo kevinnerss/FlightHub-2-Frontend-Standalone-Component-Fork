@@ -1,64 +1,63 @@
 <template>
-  <div class="h-screen bg-gray-900 text-gray-300 transition-colors duration-300 flex flex-col">
-    <!-- 导航栏 - 科技感风格 -->
-    <el-menu 
-      mode="horizontal" 
-      router 
-      class="bg-[#111827] border-b border-[#374151] text-[#93c5fd] flex-shrink-0"
-      :style="{
-        boxShadow: '0 0 15px rgba(59, 130, 246, 0.1)',
-        background: 'linear-gradient(90deg, #111827, #1e293b)'
-      }"
-    >
-      <el-menu-item 
-        index="/" 
-        class="tech-nav-item"
-        :style="{
-          fontSize: '16px',
-          fontWeight: '500',
-          transition: 'all 0.3s ease',
-          position: 'relative',
-          overflow: 'hidden',
-          color: '#93c5fd'
-        }"
-      >
-        主控台
-      </el-menu-item>
-      
-      <el-menu-item 
-        index="/alarm-management" 
-        class="tech-nav-item"
-        :style="{
-          fontSize: '16px',
-          fontWeight: '500',
-          transition: 'all 0.3s ease',
-          position: 'relative',
-          overflow: 'hidden',
-          color: '#93c5fd'
-        }"
-      >
-        告警管理
-      </el-menu-item>
-      
-      <el-menu-item 
-        index="/api-test" 
-        class="tech-nav-item"
-        :style="{
-          fontSize: '16px',
-          fontWeight: '500',
-          transition: 'all 0.3s ease',
-          position: 'relative',
-          overflow: 'hidden',
-          color: '#93c5fd'
-        }"
-      >
-        接口测试工具
-      </el-menu-item>
-    </el-menu>
+  <div class="app-container">
+    <!-- 导航栏 - 高级科技风格 -->
+    <div v-if="isAuthenticated" class="premium-nav-bar">
+      <div class="nav-content">
+        <!-- Logo区域 -->
+        <div class="logo-section">
+          <div class="logo-icon">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <span class="logo-text">FlightHub</span>
+        </div>
+        
+        <!-- 导航菜单 -->
+        <nav class="nav-menu">
+          <router-link to="/" class="nav-item" :class="{ active: $route.path === '/' }">
+            <span class="nav-icon">🎯</span>
+            <span class="nav-label">主控台</span>
+          </router-link>
+          
+          <router-link to="/alarm-management" class="nav-item" :class="{ active: $route.path === '/alarm-management' }">
+            <span class="nav-icon">⚠️</span>
+            <span class="nav-label">告警管理</span>
+          </router-link>
+          
+
+          
+          <router-link v-if="isAdmin" to="/user-management" class="nav-item" :class="{ active: $route.path === '/user-management' }">
+            <span class="nav-icon">👥</span>
+            <span class="nav-label">人员管理</span>
+          </router-link>
+        </nav>
+        
+        <!-- 用户信息区域 -->
+        <div class="user-section">
+          <div class="user-info">
+            <div class="user-avatar">
+              {{ currentUserName.charAt(0).toUpperCase() }}
+            </div>
+            <div class="user-details">
+              <div class="user-name">{{ currentUserName }}</div>
+              <div v-if="isAdmin" class="user-role">系统管理员</div>
+              <div v-else class="user-role">普通用户</div>
+            </div>
+          </div>
+          <button @click="handleLogout" class="logout-button">
+            <span class="logout-icon">🚪</span>
+            <span>退出</span>
+          </button>
+        </div>
+      </div>
+    </div>
     
-    <!-- 路由视图容器 -->
-    <div class="flex-grow overflow-hidden">
-      <router-view class="h-full" />
+    <!-- 主内容区域 -->
+    <div class="main-content">
+      <router-view />
     </div>
   </div>
 </template>
@@ -66,19 +65,62 @@
 <script>
 export default {
   name: 'App',
+  data() {
+    return {
+      isAuthenticated: false,
+      isAdmin: false,
+      currentUserName: ''
+    }
+  },
   created() {
     console.log('App 组件已创建')
-    // 检查系统主题偏好
-    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-    const isDarkMode = localStorage.getItem('darkMode') === 'true' || (!localStorage.getItem('darkMode') && prefersDark)
-    
-    // 设置暗黑模式
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark')
-    }
+    this.updateAuthStatus()
   },
   mounted() {
     console.log('App 组件已挂载')
+    
+    // 监听路由变化，更新认证状态
+    this.$router.afterEach(() => {
+      this.updateAuthStatus()
+    })
+  },
+  methods: {
+    updateAuthStatus() {
+      const token = localStorage.getItem('token')
+      const userInfoStr = localStorage.getItem('userInfo')
+      
+      this.isAuthenticated = !!token
+      
+      if (userInfoStr) {
+        try {
+          const userInfo = JSON.parse(userInfoStr)
+          this.currentUserName = userInfo.name || userInfo.username
+          this.isAdmin = userInfo.role === 'admin'
+        } catch (e) {
+          console.error('解析用户信息失败:', e)
+          this.currentUserName = ''
+          this.isAdmin = false
+        }
+      } else {
+        this.currentUserName = ''
+        this.isAdmin = false
+      }
+    },
+    async handleLogout() {
+      try {
+        await this.$store.dispatch('logout')
+        localStorage.removeItem('userInfo')
+        this.isAuthenticated = false
+        this.isAdmin = false
+        this.currentUserName = ''
+        this.$router.push('/login')
+      } catch (error) {
+        console.error('登出失败:', error)
+        localStorage.removeItem('token')
+        localStorage.removeItem('userInfo')
+        this.$router.push('/login')
+      }
+    }
   }
 }
 </script>
@@ -92,178 +134,303 @@ export default {
 }
 
 body {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background-color: #0b0f19;
-  color: #e5e7eb;
-  line-height: 1.6;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* 科技感导航样式 */
-:deep(.tech-nav-item) {
+/* 应用容器 */
+.app-container {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 50%, #0a0e27 100%);
+  background-attachment: fixed;
   position: relative;
   overflow: hidden;
 }
 
-:deep(.tech-nav-item:hover) {
-    background-color: rgba(59, 130, 246, 0.15) !important;
-    color: #bfdbfe !important;
-  }
-  
-  :deep(.tech-nav-item.is-active) {
-    background-color: rgba(59, 130, 246, 0.2) !important;
-    color: #bfdbfe !important;
-  }
-
-:deep(.tech-nav-item.is-active::after) {
+/* 背景装饰 */
+.app-container::before {
   content: '';
-  position: absolute;
-  bottom: 0;
+  position: fixed;
+  top: 0;
   left: 0;
-  width: 100%;
-  height: 2px;
-  background: linear-gradient(90deg, #3b82f6, #60a5fa);
-  box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
+  right: 0;
+  bottom: 0;
+  background: 
+    radial-gradient(circle at 20% 30%, rgba(0, 212, 255, 0.08) 0%, transparent 50%),
+    radial-gradient(circle at 80% 70%, rgba(168, 85, 247, 0.06) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
 }
 
-/* Element Plus 导航栏样式覆盖 */
-:deep(.el-menu) {
-  background-color: transparent !important;
+/* 高级导航栏 */
+.premium-nav-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  background: rgba(26, 31, 58, 0.85);
+  backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid rgba(0, 212, 255, 0.2);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), 0 0 40px rgba(0, 212, 255, 0.1);
 }
 
-:deep(.el-menu-item) {
-    color: #93c5fd !important;
-    padding: 0 20px !important;
-    height: 60px !important;
-    line-height: 60px !important;
-  }
-
-/* 添加科技感网格背景 */
-.h-screen {
-  background-image: 
-    linear-gradient(rgba(59, 130, 246, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(59, 130, 246, 0.05) 1px, transparent 1px);
-  background-size: 20px 20px;
-  background-position: center center;
-}
-
-#app {
-  width: 100%;
-  min-height: 100vh;
-  background-color: #0b0f19;
-  background-image: 
-    radial-gradient(circle at 25% 25%, rgba(59, 130, 246, 0.1) 0%, transparent 50%),
-    linear-gradient(to bottom, rgba(17, 24, 39, 0.9), rgba(11, 15, 25, 0.9)),
-    url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiMxNTE5MjkiIGZpbGwtb3BhY2l0eT0iMC4xIj48cGF0aCBkPSJNMzYgMzRjMC0yLjIxLTEuNzktNC00LTRzLTQgMS43OS00IDQgMS43OSA0IDQgNCA0LTEuNzkgNC00em0wLTE2YzAtMi4yMS0xLjc5LTQtNC00cy00IDEuNzktNCA0IDEuNzkgNCA0IDQgNC0xLjc5IDQtNHoiLz48cGF0aCBkPSJNMjAgMjBjMC0yLjIxLTEuNzktNC00LTRzLTQgMS43OS00IDQgMS43OSA0IDQgNCA0LTEuNzkgNC00em0xNiAxNmMwLTIuMjEtMS43OS00LTQtNHMtNCAxLjc5LTQgNCAxLjc5IDQgNCA0IDQtMS43OSA0LTR6Ii8+PC9nPjwvZz48L3N2Zz4=');
-  background-attachment: fixed;
-  background-position: center;
-}
-
-/* 全局滚动条样式 */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: #1f2937;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #374151;
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #4b5563;
-}
-
-/* 全局过渡动画 */
-.fade-enter-active, .fade-leave-active {
-  transition: opacity 0.3s;
-}
-
-.fade-enter-from, .fade-leave-to {
-  opacity: 0;
-}
-
-/* 防止内容溢出 */
-.overflow-hidden {
-  overflow: hidden;
-}
-
-/* 内容居中 */
-.content-center {
+.nav-content {
+  max-width: 1920px;
+  margin: 0 auto;
+  padding: 0 32px;
+  height: 72px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+}
+
+/* Logo区域 */
+.logo-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.logo-icon {
+  width: 36px;
+  height: 36px;
+  color: #00d4ff;
+  filter: drop-shadow(0 0 8px rgba(0, 212, 255, 0.5));
+  animation: pulse 3s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
+}
+
+.logo-text {
+  font-size: 22px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #00d4ff 0%, #0099ff 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: 0.5px;
+}
+
+/* 导航菜单 */
+.nav-menu {
+  display: flex;
+  gap: 8px;
+  flex: 1;
   justify-content: center;
 }
 
-/* 响应式边距 */
-@media (max-width: 768px) {
-  .container {
-    padding: 1rem;
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 10px;
+  color: #94a3b8;
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 500;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.nav-item::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.1) 0%, rgba(0, 153, 255, 0.1) 100%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.nav-item:hover {
+  color: #e2e8f0;
+  transform: translateY(-1px);
+}
+
+.nav-item:hover::before {
+  opacity: 1;
+}
+
+.nav-item.active {
+  color: #00d4ff;
+  background: linear-gradient(135deg, rgba(0, 212, 255, 0.15) 0%, rgba(0, 153, 255, 0.15) 100%);
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.2), inset 0 0 20px rgba(0, 212, 255, 0.1);
+}
+
+.nav-item.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 20px;
+  right: 20px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #00d4ff, transparent);
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.8);
+}
+
+.nav-icon {
+  font-size: 18px;
+  filter: grayscale(50%);
+  transition: filter 0.3s ease;
+}
+
+.nav-item:hover .nav-icon,
+.nav-item.active .nav-icon {
+  filter: grayscale(0%);
+}
+
+.nav-label {
+  position: relative;
+  z-index: 1;
+}
+
+/* 用户信息区域 */
+.user-section {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: rgba(42, 47, 74, 0.5);
+  border-radius: 12px;
+  border: 1px solid rgba(0, 212, 255, 0.1);
+}
+
+.user-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #00d4ff 0%, #0099ff 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(0, 212, 255, 0.3);
+}
+
+.user-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.user-name {
+  color: #e2e8f0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.user-role {
+  color: #00d4ff;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+/* 退出按钮 */
+.logout-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 18px;
+  background: transparent;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 10px;
+  color: #ef4444;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.logout-button:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: #ef4444;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+}
+
+.logout-icon {
+  font-size: 16px;
+}
+
+/* 主内容区域 */
+.main-content {
+  position: relative;
+  z-index: 1;
+  min-height: calc(100vh - 72px);
+  padding: 24px;
+}
+
+/* 全局滚动条 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(26, 31, 58, 0.3);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #00d4ff 0%, #0099ff 100%);
+  border-radius: 5px;
+  border: 2px solid rgba(26, 31, 58, 0.3);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, #00e5ff 0%, #00aaff 100%);
+}
+
+/* 响应式设计 */
+@media (max-width: 1200px) {
+  .nav-content {
+    padding: 0 20px;
+  }
+  
+  .user-info {
+    display: none;
   }
 }
 
-/* 全局Element Plus样式覆盖 */
-/* 下拉选择框样式 */
-.el-select {
-  --el-input-bg-color: #1f2937 !important;
-  --el-input-border-color: #374151 !important;
-  --el-input-text-color: #d1d5db !important;
-  --el-input-hover-border-color: #3b82f6 !important;
-  --el-input-focus-border-color: #3b82f6 !important;
-}
-
-.el-input__wrapper {
-  background-color: #1f2937 !important;
-  border: 1px solid #374151 !important;
-  box-shadow: none !important;
-}
-
-.el-input__inner {
-  background-color: #1f2937 !important;
-  border: none !important;
-  color: #d1d5db !important;
-}
-
-.el-input__suffix-inner .el-input__icon {
-  color: #9ca3af !important;
-}
-
-/* 下拉菜单样式 */
-.el-select-dropdown {
-  background-color: #1f2937 !important;
-  border: 1px solid #374151 !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
-}
-
-.el-select-dropdown__item {
-  color: #d1d5db !important;
-}
-
-.el-select-dropdown__item:hover {
-  background-color: #374151 !important;
-  color: #93c5fd !important;
-}
-
-.el-select-dropdown__item.selected {
-  background-color: #1e3a8a !important;
-  color: #93c5fd !important;
-}
-
-/* 确保搜索筛选区域的样式优先级 */
-.search-filters .el-select {
-  background-color: #1f2937 !important;
-}
-
-.search-filters .el-input__wrapper {
-  background-color: #1f2937 !important;
-  border: 1px solid #374151 !important;
-}
-
-.search-filters .el-input__inner {
-  background-color: #1f2937 !important;
-  color: #d1d5db !important;
+@media (max-width: 768px) {
+  .nav-content {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 16px;
+    gap: 16px;
+  }
+  
+  .nav-menu {
+    width: 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+  
+  .nav-item {
+    white-space: nowrap;
+  }
+  
+  .logo-text {
+    display: none;
+  }
 }
 </style>

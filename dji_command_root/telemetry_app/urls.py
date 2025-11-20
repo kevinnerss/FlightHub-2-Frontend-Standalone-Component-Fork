@@ -3,12 +3,14 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 # 导入所有 ViewSet
-from .views import AlarmViewSet, AlarmCategoryViewSet, WaylineViewSet
+from .views import AlarmViewSet, AlarmCategoryViewSet, WaylineViewSet, AuthViewSet, UserViewSet
 
 router = DefaultRouter()
 router.register(r'alarms', AlarmViewSet)
 router.register(r'alarm-categories', AlarmCategoryViewSet, basename='alarmcategory')
 router.register(r'waylines', WaylineViewSet)  # 注册航线视图集
+router.register(r'auth', AuthViewSet, basename='auth')
+router.register(r'users', UserViewSet, basename='user')
 
 urlpatterns = [
     path('', include(router.urls)),
