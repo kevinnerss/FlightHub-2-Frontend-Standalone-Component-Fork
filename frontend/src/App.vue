@@ -27,6 +27,11 @@
             <span class="nav-label">告警管理</span>
           </router-link>
           
+          <router-link to="/alarm-stats" class="nav-item" :class="{ active: $route.path === '/alarm-stats' }">
+            <span class="nav-icon">📊</span>
+            <span class="nav-label">告警统计</span>
+          </router-link>
+          
 
           
           <router-link v-if="isAdmin" to="/user-management" class="nav-item" :class="{ active: $route.path === '/user-management' }">

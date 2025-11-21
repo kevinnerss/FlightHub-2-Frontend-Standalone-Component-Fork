@@ -45,6 +45,9 @@
               <button @click="processAlarm(alarm.id)" class="action-btn process-btn">
                 标记处理
               </button>
+              <button @click="locateAlarm(alarm)" class="action-btn locate-btn">
+                定位
+              </button>
             </div>
           </div>
         </div>
@@ -91,6 +94,10 @@ export default {
     
     processAlarm(alarmId) {
       this.$emit('process-alarm', alarmId)
+    },
+
+    locateAlarm(alarm) {
+      this.$emit('locate-alarm', alarm)
     }
   }
 }
@@ -400,6 +407,17 @@ export default {
 
 .process-btn:hover {
   background: rgba(239, 68, 68, 0.25);
+  transform: translateY(-1px);
+}
+
+.locate-btn {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.locate-btn:hover {
+  background: rgba(245, 158, 11, 0.25);
   transform: translateY(-1px);
 }
 </style>

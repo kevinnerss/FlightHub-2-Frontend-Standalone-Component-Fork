@@ -55,6 +55,17 @@ export default {
     }
   },
 
+  // 获取单条航线详情（含航迹点）
+  async getWaylineDetail(id) {
+    try {
+      const response = await api.get(`/waylines/${id}/`)
+      return response
+    } catch (error) {
+      console.error('获取航线详情失败:', error)
+      throw error
+    }
+  },
+
   // 获取单个告警详情
   async getAlarmDetail(alarmId) {
     try {

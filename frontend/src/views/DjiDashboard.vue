@@ -20,18 +20,12 @@
     <div class="dashboard-content">
       <!-- 左侧面板 - 航线管理 -->
       <div class="side-panel left-panel">
-        <div class="panel-header">
-          <h3 class="panel-title">航线管理</h3>
-        </div>
-        <div class="panel-body">
+
+        <div class="panel-body compact-panel">
           <WaylineFallback 
-            v-if="!fh2Loaded" 
             :current-selected-id="selectedWayline?.id"
             @wayline-selected="handleWaylineSelected"
           />
-          <div v-else class="dji-placeholder">
-            <p>航线列表将在这里显示（由大疆组件提供）</p>
-          </div>
         </div>
       </div>
 
@@ -50,6 +44,11 @@
 
         <!-- Cesium 3D视图 -->
         <div class="cesium-section">
+          <div class="cesium-controls">
+            <button class="control-btn" @click="focusOnModel">定位模型</button>
+            <button class="control-btn" @click="resetCameraView">重置视角</button>
+            <button class="control-btn" @click="toggleGlobe">{{ globeVisible ? '隐藏地球' : '显示地球' }}</button>
+          </div>
           <!-- 直接使用ref作为Cesium容器 -->
           <div ref="cesiumContainer" class="cesium-container">
             <!-- 加载指示器 -->
@@ -75,12 +74,6 @@
       <div class="side-panel right-panel">
         <!-- 告警信息面板 -->
         <div class="panel-section">
-          <div class="panel-header">
-            <h3 class="panel-title">报警信息</h3>
-            <span v-if="selectedWayline" class="wayline-badge">
-              {{ selectedWayline.name }}
-            </span>
-          </div>
           <div class="panel-body alarm-panel-body">
             <AlarmPanel 
               v-if="selectedWayline"
@@ -89,6 +82,7 @@
               @refresh="handleAlarmRefresh"
               @view-detail="handleViewAlarmDetail"
               @process-alarm="handleProcessAlarm"
+              @locate-alarm="handleLocateAlarm"
             />
             <div v-else class="dji-placeholder">
               <p>请先选择航线查看告警信息</p>
@@ -96,7 +90,7 @@
           </div>
         </div>
 
-        <!-- 实时监控面板 -->
+        <!-- 实时监控面板（大疆二开组件位） -->
         <div class="panel-section">
           <div class="panel-header">
             <h3 class="panel-title">实时监控</h3>
@@ -177,11 +171,17 @@ export default {
       remainingTime: '12:45',
       completedTasks: 8,
       totalTasks: 12,
+      cesiumLib: null,
       viewer: null,
       tileset: null,
       loading: false,
       error: '',
+      globeVisible: true,
+      imageryProviderType: 'aerial',
       fh2Loaded: false,
+      waylineEntity: null,
+      alarmEntities: [],
+      pickHandler: null,
       selectedWayline: null,
       alarms: [],
       loadingAlarms: false,
@@ -209,6 +209,10 @@ export default {
       this.viewer.destroy()
       this.viewer = null
     }
+    if (this.pickHandler) {
+      this.pickHandler.destroy()
+      this.pickHandler = null
+    }
   },
   methods: {
     checkFh2Availability() {
@@ -231,7 +235,9 @@ export default {
       this.error = ''
       try {
         const Cesium = await import('cesium')
-        Cesium.Ion.defaultAccessToken = Cesium.Ion.defaultAccessToken || ''
+        this.cesiumLib = Cesium
+        Cesium.Ion.defaultAccessToken =
+          process.env.VUE_APP_CESIUM_ION_TOKEN || Cesium.Ion.defaultAccessToken || ''
         
         const container = this.$refs.cesiumContainer
         if (!container) {
@@ -260,6 +266,11 @@ export default {
           creditContainer: document.createElement('div')
         })
         
+        this.viewer.scene.globe.show = this.globeVisible
+        await this.setupImageryLayers(Cesium)
+        this.tuneCameraControls(this.viewer.scene.screenSpaceCameraController)
+        this.setupPickHandler(Cesium)
+
         // 强制resize确保canvas正确渲染
         this.viewer.resize()
         
@@ -303,11 +314,40 @@ export default {
     handleWaylineSelected(wayline) {
       this.selectedWayline = wayline
       this.fetchAlarmsByWayline(wayline.id)
+      this.ensureWaylineWithPoints(wayline)
+    },
+
+    async setupImageryLayers(Cesium) {
+      if (!this.viewer) return
+      const layers = this.viewer.imageryLayers
+      layers.removeAll()
+      try {
+        const provider = await Cesium.IonImageryProvider.fromAssetId(2)
+        layers.addImageryProvider(provider)
+      } catch (e) {
+        console.warn('Ion 底图加载失败，改用 OSM', e)
+        layers.addImageryProvider(
+          new Cesium.OpenStreetMapImageryProvider({
+            url: 'https://a.tile.openstreetmap.org/'
+          })
+        )
+      }
+    },
+
+    tuneCameraControls(controller) {
+      if (!controller) return
+      controller.inertiaSpin = 0.4
+      controller.inertiaTranslate = 0.4
+      controller.inertiaZoom = 0.4
+      controller.minimumZoomRate = 0.2
+      controller.maximumZoomRate = 500000
+      controller._zoomFactor = 1.5
     },
     
     async fetchAlarmsByWayline(waylineId) {
       if (!waylineId) {
         this.alarms = []
+        this.clearAlarmMarkers()
         return
       }
       
@@ -315,9 +355,11 @@ export default {
       try {
         const response = await alarmApi.getAlarms({ wayline_id: waylineId })
         this.alarms = Array.isArray(response) ? response : (response.results || [])
+        this.plotAlarmMarkers(this.alarms)
       } catch (error) {
         console.error('获取告警信息失败:', error)
         this.alarms = []
+        this.clearAlarmMarkers()
       } finally {
         this.loadingAlarms = false
       }
@@ -330,6 +372,221 @@ export default {
     handleAlarmRefresh() {
       if (this.selectedWayline) {
         this.fetchAlarmsByWayline(this.selectedWayline.id)
+      }
+      // 保持标记与最新数据同步
+      if (this.alarms.length) {
+        this.plotAlarmMarkers(this.alarms)
+      }
+    },
+
+    handleLocateAlarm(alarm) {
+      const lat = this.toNumber(alarm?.latitude)
+      const lon = this.toNumber(alarm?.longitude)
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || !this.viewer) return
+      const Cesium = this.cesiumLib || window.Cesium
+      if (!Cesium) return
+      const height = this.toNumber(alarm?.altitude) || 200
+      const destination = Cesium.Cartesian3.fromDegrees(lon, lat, height)
+      const flyPromise = this.viewer.camera.flyTo({
+        destination,
+        orientation: {
+          heading: Cesium.Math.toRadians(0),
+          pitch: Cesium.Math.toRadians(-45),
+          roll: 0.0
+        },
+        duration: 1.2
+      })
+      if (flyPromise && typeof flyPromise.catch === 'function') {
+        flyPromise.catch(() => {})
+      }
+    },
+    plotAlarmMarkers(alarms) {
+      if (!this.viewer) return
+      const Cesium = this.cesiumLib || window.Cesium
+      if (!Cesium) return
+      this.clearAlarmMarkers()
+      const entities = []
+      const pinBuilder = (Cesium.PinBuilder) ? new Cesium.PinBuilder() : null
+      const pinCanvas = pinBuilder ? pinBuilder.fromColor(Cesium.Color.ORANGE, 32) : null
+      alarms.forEach(alarm => {
+        const lat = this.toNumber(alarm.latitude)
+        const lon = this.toNumber(alarm.longitude)
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return
+        const position = Cesium.Cartesian3.fromDegrees(lon, lat, this.toNumber(alarm.altitude) || 0)
+        const entity = this.viewer.entities.add({
+          position,
+          alarmData: alarm,
+          point: {
+            pixelSize: 12,
+            color: Cesium.Color.ORANGE.withAlpha(0.95),
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 2,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
+          },
+          billboard: {
+            image: pinCanvas || undefined,
+            width: 32,
+            height: 32,
+            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
+          },
+          label: {
+            text: alarm.id ? String(alarm.id) : '报警',
+            font: '14px sans-serif',
+            fillColor: Cesium.Color.WHITE,
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 2,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            pixelOffset: new Cesium.Cartesian2(0, -28),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
+          }
+        })
+        entities.push(entity)
+      })
+      this.alarmEntities = entities
+    },
+
+    clearAlarmMarkers() {
+      if (this.viewer && this.alarmEntities.length) {
+        this.alarmEntities.forEach(e => this.viewer.entities.remove(e))
+      }
+      this.alarmEntities = []
+    },
+
+    setupPickHandler(Cesium) {
+      if (!this.viewer || this.pickHandler) return
+      this.pickHandler = new Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas)
+      this.pickHandler.setInputAction(click => {
+        const picked = this.viewer.scene.pick(click.position)
+        if (Cesium.defined(picked) && picked.id && picked.id.alarmData) {
+          this.currentAlarm = picked.id.alarmData
+          this.showAlarmDetail = true
+        }
+      }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
+    },
+
+    toNumber(val) {
+      const num = Number(val)
+      return Number.isFinite(num) ? num : NaN
+    },
+
+    async ensureWaylineWithPoints(wayline) {
+      const hasPoints = Array.isArray(wayline?.waypoints) && wayline.waypoints.length > 0
+      let finalWayline = wayline
+      if (!hasPoints && wayline?.id) {
+        try {
+          const detail = await alarmApi.getWaylineDetail(wayline.id)
+          finalWayline = (detail && detail.id) ? detail : wayline
+        } catch (err) {
+          console.warn('获取航线详情失败，使用已选航线基本信息', err)
+        }
+      }
+      this.drawWaylineOnMap(finalWayline)
+    },
+
+    drawWaylineOnMap(wayline) {
+      if (!this.viewer || !wayline?.waypoints?.length) {
+        return
+      }
+      const Cesium = this.cesiumLib || window.Cesium
+      if (!Cesium) return
+
+      // 清理旧的路径
+      if (this.waylineEntity) {
+        this.viewer.entities.remove(this.waylineEntity)
+        this.waylineEntity = null
+      }
+
+      const positions = wayline.waypoints
+        .filter(p => p.longitude !== undefined && p.latitude !== undefined)
+        .map(p => Cesium.Cartesian3.fromDegrees(p.longitude, p.latitude, p.height || 0))
+
+      if (!positions.length) return
+
+      this.waylineEntity = this.viewer.entities.add({
+        name: wayline.name || '航线',
+        polyline: {
+          positions,
+          width: 6,
+          material: Cesium.Color.YELLOW.withAlpha(0.9),
+          clampToGround: false
+        }
+      })
+
+      // 定位到路径
+      const sphere = Cesium.BoundingSphere.fromPoints(positions)
+      this.viewer.camera.flyToBoundingSphere(sphere, {
+        duration: 1.2,
+        offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-20), sphere.radius * 3)
+      })
+    },
+
+    focusOnModel() {
+      if (this.viewer && this.tileset) {
+        const Cesium = this.cesiumLib || window.Cesium
+        if (!Cesium) return
+        const range = (this.tileset.boundingSphere?.radius || 1000) * 2.5
+        this.viewer.flyTo(this.tileset, {
+          offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-30), range)
+        }).catch(err => {
+          console.warn('飞到模型失败', err)
+        })
+      } else if (this.viewer && this.waylineEntity) {
+        const Cesium = this.cesiumLib || window.Cesium
+        if (!Cesium) return
+        const positions = this.waylineEntity.polyline.positions.getValue(new Cesium.JulianDate())
+        const sphere = Cesium.BoundingSphere.fromPoints(positions)
+        this.viewer.camera.flyToBoundingSphere(sphere, {
+          duration: 1.2,
+          offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-20), sphere.radius * 3)
+        })
+      }
+    },
+
+    resetCameraView() {
+      if (this.viewer) {
+        const Cesium = this.cesiumLib || window.Cesium
+        if (!Cesium) return
+
+        // 优先定位到当前航线起点
+        if (this.waylineEntity?.polyline?.positions) {
+          const positions = this.waylineEntity.polyline.positions.getValue(new Cesium.JulianDate())
+          const first = Array.isArray(positions) && positions.length ? positions[0] : null
+          if (first) {
+            this.viewer.camera.flyTo({
+              destination: first,
+              orientation: {
+                heading: Cesium.Math.toRadians(0),
+                pitch: Cesium.Math.toRadians(-45),
+                roll: 0.0
+              },
+              duration: 1.2
+            })
+            return
+          }
+        }
+
+        // 退回模型中心
+        if (this.tileset?.boundingSphere) {
+          const range = (this.tileset.boundingSphere.radius || 1000) * 3
+          this.viewer.camera.flyTo({
+            destination: this.tileset.boundingSphere.center,
+            orientation: {
+              heading: Cesium.Math.toRadians(0),
+              pitch: Cesium.Math.toRadians(-20),
+              roll: 0.0
+            },
+            duration: 1.5,
+            maximumHeight: range
+          })
+        }
+      }
+    },
+
+    toggleGlobe() {
+      this.globeVisible = !this.globeVisible
+      if (this.viewer) {
+        this.viewer.scene.globe.show = this.globeVisible
       }
     },
     
@@ -478,6 +735,9 @@ export default {
   overflow: hidden;
   min-height: 0;
 }
+.compact-panel {
+  padding: 0;
+}
 
 .alarm-panel-body {
   max-height: 400px;
@@ -533,6 +793,31 @@ export default {
   width: 100%;
   height: 100%;
   position: relative;
+}
+
+.cesium-controls {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 8px;
+  z-index: 5;
+}
+
+.control-btn {
+  padding: 8px 12px;
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  border-radius: 10px;
+  background: rgba(26, 31, 58, 0.8);
+  color: #e0f2fe;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.control-btn:hover {
+  background: rgba(0, 212, 255, 0.15);
+  border-color: rgba(0, 212, 255, 0.5);
 }
 
 /* 加载和错误覆盖层 */

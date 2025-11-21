@@ -1,13 +1,11 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-// 懒加载路由组件
+// Lazy-loaded route components
 const Login = () => import('../views/Login.vue')
 const UserManagement = () => import('../views/UserManagement.vue')
 const DjiDashboard = () => import('../views/DjiDashboard.vue')
-
 const AlarmManagement = () => import('../views/AlarmManagement.vue')
-
-
+const AlarmStats = () => import('../views/AlarmStats.vue')
 
 const routes = [
   {
@@ -15,7 +13,7 @@ const routes = [
     name: 'Login',
     component: Login,
     meta: {
-      title: '登录',
+      title: '\u767b\u5f55',
       requiresAuth: false
     }
   },
@@ -25,7 +23,7 @@ const routes = [
     name: 'UserManagement',
     component: UserManagement,
     meta: {
-      title: '人员管理',
+      title: '\u4eba\u5458\u7ba1\u7406',
       requiresAuth: true,
       requiresAdmin: true
     }
@@ -36,7 +34,7 @@ const routes = [
     name: 'DjiDashboard',
     component: DjiDashboard,
     meta: {
-      title: '主控台',
+      title: '\u4e3b\u63a7\u53f0',
       requiresAuth: true
     }
   },
@@ -46,14 +44,23 @@ const routes = [
     name: 'AlarmManagement',
     component: AlarmManagement,
     meta: {
-      title: '告警管理',
+      title: '\u544a\u8b66\u7ba1\u7406',
       requiresAuth: true
     }
   },
 
+  {
+    path: '/alarm-stats',
+    name: 'AlarmStats',
+    component: AlarmStats,
+    meta: {
+      title: '\u544a\u8b66\u7edf\u8ba1',
+      requiresAuth: true
+    }
+  },
 
   
-  // 404页面
+  // 404 page
   {
     path: '/:pathMatch(.*)*',
     redirect: '/'
@@ -65,23 +72,21 @@ const router = createRouter({
   routes
 })
 
-// 全局前置守卫 - 实现认证和授权控制
+// Global guard - authentication and authorization
 router.beforeEach((to, from, next) => {
-  // 设置页面标题
-  document.title = to.meta.title || '无人机巡检数字孪生系统'
+  // Set page title
+  document.title = to.meta.title || '\u65e0\u4eba\u673a\u5de1\u68c0\u6570\u5b57\u5b6a\u751f\u7cfb\u7edf'
   
-  // 获取认证状态
+  // Authentication state
   const isAuthenticated = localStorage.getItem('token') !== null
   
-  // 检查是否需要认证
+  // Require authentication
   if (to.meta.requiresAuth && !isAuthenticated) {
-    // 未认证且需要认证，跳转到登录页
     return next({ name: 'Login', query: { redirect: to.fullPath } })
   }
   
-  // 检查是否需要管理员权限
+  // Require admin role
   if (to.meta.requiresAdmin) {
-    // 从localStorage获取用户角色信息
     const userStr = localStorage.getItem('userInfo')
     let isAdmin = false
     
@@ -90,17 +95,16 @@ router.beforeEach((to, from, next) => {
         const userInfo = JSON.parse(userStr)
         isAdmin = userInfo.role === 'admin'
       } catch (e) {
-        console.error('解析用户信息失败:', e)
+        console.error('Failed to parse user info:', e)
       }
     }
     
     if (!isAdmin) {
-      // 没有管理员权限，跳转到首页
       return next({ name: 'DjiDashboard' })
     }
   }
   
-  // 已认证用户访问登录页时，重定向到首页
+  // Redirect authenticated users away from login
   if (to.name === 'Login' && isAuthenticated) {
     return next({ name: 'DjiDashboard' })
   }
