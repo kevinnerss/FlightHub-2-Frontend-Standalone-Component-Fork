@@ -6,6 +6,7 @@ const UserManagement = () => import('../views/UserManagement.vue')
 const DjiDashboard = () => import('../views/DjiDashboard.vue')
 const AlarmManagement = () => import('../views/AlarmManagement.vue')
 const AlarmStats = () => import('../views/AlarmStats.vue')
+const ComponentConfig = () => import('../views/ComponentConfig.vue')
 
 const routes = [
   {
@@ -24,6 +25,17 @@ const routes = [
     component: UserManagement,
     meta: {
       title: '\u4eba\u5458\u7ba1\u7406',
+      requiresAuth: true,
+      requiresAdmin: true
+    }
+  },
+
+  {
+    path: '/component-config',
+    name: 'ComponentConfig',
+    component: ComponentConfig,
+    meta: {
+      title: '\u7ec4\u4ef6\u53c2\u6570\u914d\u7f6e',
       requiresAuth: true,
       requiresAdmin: true
     }

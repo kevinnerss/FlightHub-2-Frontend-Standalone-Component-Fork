@@ -24,7 +24,7 @@ export default {
     },
     config: {
       type: Object,
-      required: true
+      default: () => ({})
     }
   },
   computed: {

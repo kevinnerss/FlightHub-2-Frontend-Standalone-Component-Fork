@@ -1,15 +1,17 @@
 <template>
   <div ref="container" class="dji-space-component-container">
     <div v-if="loading" class="loading-placeholder">
-      <p>ç»„ä»¶åŠ è½½ä¸­...</p>
+      <p>×é¼ş¼ÓÔØÖĞ...</p>
     </div>
     <div v-if="error" class="error-placeholder">
-      <p>ç»„ä»¶åŠ è½½å¤±è´¥: {{ error }}</p>
+      <p>×é¼ş¼ÓÔØÊ§°Ü: {{ error }}</p>
     </div>
   </div>
 </template>
 
 <script>
+import componentConfigApi from '../api/componentConfigApi.js'
+
 export default {
   name: 'DjiSpaceComponent',
   props: {
@@ -23,21 +25,26 @@ export default {
     },
     config: {
       type: Object,
-      required: true
+      default: () => ({})
+    },
+    // ¿ÉÑ¡£ºÊÖ¶¯Ö¸¶¨ÈİÆ÷ ID£¨Ä¬ÈÏ×Ô¶¯Éú³É£©
+    containerId: {
+      type: String,
+      default: ''
     }
   },
   data() {
     return {
       loading: false,
       error: null,
-      loaded: false
+      loaded: false,
+      backendConfig: null
     }
   },
   mounted() {
     this.initComponent()
   },
   beforeUnmount() {
-    // æ¸…ç†ç»„ä»¶
     if (this.loaded && window.FH2 && this.$refs.container) {
       this.$refs.container.innerHTML = ''
     }
@@ -46,36 +53,43 @@ export default {
     async initComponent() {
       this.loading = true
       this.error = null
-      
+
       try {
-        // æ£€æŸ¥FH2æ˜¯å¦å­˜åœ¨
         if (!window.FH2) {
-          throw new Error('FH2æœªæ­£ç¡®åŠ è½½ï¼Œè¯·æ£€æŸ¥paas.jsæ˜¯å¦æ­£ç¡®å¼•å…¥')
+          throw new Error('FH2Î´ÕıÈ·¼ÓÔØ£¬Çë¼ì²épaas.jsÊÇ·ñÕıÈ·ÒıÈë')
         }
-        
-        // åˆå§‹åŒ–é…ç½®
-        if (this.config) {
-          window.FH2.initConfig(this.config)
+
+        // ÓÅÏÈÀ­È¡ºó¶Ë±£´æµÄ¹«¹²²ÎÊı£¬ÔÙÓÃÇ°¶Ë´«Èë¸²¸Ç
+        let mergedConfig = {}
+        try {
+          this.backendConfig = await componentConfigApi.getConfig()
+          if (this.backendConfig && typeof this.backendConfig === 'object') {
+            mergedConfig = { ...this.backendConfig }
+          }
+        } catch (err) {
+          console.warn('»ñÈ¡×é¼şÅäÖÃÊ§°Ü£¬Ê¹ÓÃÇ°¶Ë´«ÈëÅäÖÃ', err)
         }
-        
-        // ç­‰å¾…DOMæ›´æ–°
+        mergedConfig = { ...mergedConfig, ...(this.config || {}) }
+
+        // demo ÖĞÒªÇóµÄ¹Ø¼ü×Ö¶Î
+        if (!mergedConfig.serverUrl || !mergedConfig.hostUrl || !mergedConfig.projectToken) {
+          console.warn('FH2 ÅäÖÃÈ±ÉÙ serverUrl/hostUrl/projectToken£¬ÇëÔÚ¡°×é¼ş²ÎÊıÅäÖÃ¡±Ò³Ãæ²¹È«')
+        }
+        window.FH2.initConfig(mergedConfig)
+
         await this.$nextTick()
-        
-        // æ£€æŸ¥å®¹å™¨å¼•ç”¨æ˜¯å¦å­˜åœ¨
+
         if (!this.$refs.container) {
-          throw new Error('å®¹å™¨å…ƒç´ ä¸å­˜åœ¨')
+          throw new Error('ÈİÆ÷ÔªËØ²»´æÔÚ')
         }
-        
-        // ç”Ÿæˆå”¯ä¸€çš„å®¹å™¨ID
-        const containerId = `dji-component-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+
+        const containerId = this.containerId || `dji-component-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
         this.$refs.container.id = containerId
-        
-        // æ£€æŸ¥å®¹å™¨å…ƒç´ æ˜¯å¦å­˜åœ¨
+
         if (!document.getElementById(containerId)) {
-          throw new Error('å®¹å™¨å…ƒç´ æœªæ­£ç¡®åˆ›å»º')
+          throw new Error('ÈİÆ÷ÔªËØÎ´ÕıÈ·´´½¨')
         }
-        
-        // æ ¹æ®ç»„ä»¶åç§°åŠ è½½å¯¹åº”ç»„ä»¶
+
         switch (this.componentName) {
           case 'project':
             window.FH2.loadProject(containerId)
@@ -90,13 +104,13 @@ export default {
             window.FH2.loadWaylineCreation(containerId)
             break
           default:
-            throw new Error(`ä¸æ”¯æŒçš„ç»„ä»¶åç§°: ${this.componentName}`)
+            throw new Error(`²»Ö§³ÖµÄ×é¼şÃû³Æ: ${this.componentName}`)
         }
-        
+
         this.loaded = true
       } catch (err) {
         this.error = err.message
-        console.error('ç»„ä»¶åŠ è½½å¤±è´¥:', err)
+        console.error('×é¼ş¼ÓÔØÊ§°Ü:', err)
       } finally {
         this.loading = false
       }

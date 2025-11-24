@@ -32,12 +32,23 @@
             <span class="nav-label">告警统计</span>
           </router-link>
           
-
           
           <router-link v-if="isAdmin" to="/user-management" class="nav-item" :class="{ active: $route.path === '/user-management' }">
             <span class="nav-icon">👥</span>
             <span class="nav-label">人员管理</span>
           </router-link>
+
+          <router-link
+            v-if="isAdmin"
+            to="/component-config"
+            class="nav-item"
+            :class="{ active: $route.path === '/component-config' }"
+          >
+            <span class="nav-icon">🛠️</span>
+            <span class="nav-label">组件配置</span>
+          </router-link>
+
+
         </nav>
         
         <!-- 用户信息区域 -->

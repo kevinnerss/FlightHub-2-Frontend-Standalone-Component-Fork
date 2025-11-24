@@ -19,7 +19,7 @@ export default {
   props: {
     config: {
       type: Object,
-      required: true
+      default: () => ({})
     }
   },
   methods: {

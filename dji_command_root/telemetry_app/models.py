@@ -167,3 +167,27 @@ class UserProfile(models.Model):
     
     def __str__(self):
         return f"用户 {self.user.username} - {self.name}"
+
+
+class ComponentConfig(models.Model):
+    """
+    存储大疆二开组件公共参数（对应官方 demo）
+    """
+    serverUrl = models.CharField(max_length=255, blank=True, null=True, verbose_name="服务器地址")
+    wssUrl = models.CharField(max_length=255, blank=True, null=True, verbose_name="WSS 地址")
+    hostUrl = models.CharField(max_length=255, blank=True, null=True, verbose_name="Host 地址")
+    prjId = models.CharField(max_length=255, blank=True, null=True, verbose_name="项目ID")
+    projectToken = models.CharField(max_length=255, blank=True, null=True, verbose_name="组织密钥")
+    userId = models.CharField(max_length=255, blank=True, null=True, verbose_name="用户ID")
+    workspaceId = models.CharField(max_length=255, blank=True, null=True, verbose_name="工作区/组织ID")
+    fh2_project_id = models.CharField(max_length=255, blank=True, null=True, verbose_name="兼容字段-项目ID")
+    extra_params = models.JSONField(blank=True, null=True, verbose_name="附加参数")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "组件公共参数"
+        verbose_name_plural = "组件公共参数"
+
+    def __str__(self):
+        return f"组件配置 {self.id}"

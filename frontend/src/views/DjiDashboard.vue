@@ -156,6 +156,7 @@ import TaskProgressBar from '../components/TaskProgressBar.vue'
 import AlarmPanel from '../components/AlarmPanel.vue'
 import WaylineFallback from '../components/WaylineFallback.vue'
 import alarmApi from '../api/alarmApi.js'
+import componentConfigApi from '../api/componentConfigApi.js'
 
 export default {
   name: 'DjiDashboard',
@@ -187,7 +188,8 @@ export default {
       loadingAlarms: false,
       showAlarmDetail: false,
       currentAlarm: null,
-      fh2CheckTimer: null
+      fh2CheckTimer: null,
+      componentConfig: null
     }
   },
   mounted() {
@@ -195,7 +197,8 @@ export default {
     // 等待DOM完全渲染后再初始化Cesium
     this.$nextTick(() => {
       // 使用setTimeout确保布局计算完成
-      setTimeout(() => {
+      setTimeout(async () => {
+        await this.loadComponentConfig()
         this.initCesium()
       }, 500)
     })
@@ -236,8 +239,9 @@ export default {
       try {
         const Cesium = await import('cesium')
         this.cesiumLib = Cesium
+        const tokenFromConfig = this.componentConfig?.cesium_ion_token || this.componentConfig?.cesiumIonToken
         Cesium.Ion.defaultAccessToken =
-          process.env.VUE_APP_CESIUM_ION_TOKEN || Cesium.Ion.defaultAccessToken || ''
+          tokenFromConfig || process.env.VUE_APP_CESIUM_ION_TOKEN || Cesium.Ion.defaultAccessToken || ''
         
         const container = this.$refs.cesiumContainer
         if (!container) {
@@ -315,6 +319,14 @@ export default {
       this.selectedWayline = wayline
       this.fetchAlarmsByWayline(wayline.id)
       this.ensureWaylineWithPoints(wayline)
+    },
+
+    async loadComponentConfig() {
+      try {
+        this.componentConfig = await componentConfigApi.getConfig()
+      } catch (err) {
+        console.warn('获取组件配置失败，将使用默认配置', err)
+      }
     },
 
     async setupImageryLayers(Cesium) {

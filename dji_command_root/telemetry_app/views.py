@@ -7,10 +7,11 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from rest_framework.authtoken.models import Token
 
-from .models import Alarm, AlarmCategory, Wayline, UserProfile
+from .models import Alarm, AlarmCategory, Wayline, UserProfile, ComponentConfig
 from .serializers import (
     AlarmSerializer, AlarmCategorySerializer, WaylineSerializer,
-    UserSerializer, UserCreateSerializer, LoginSerializer, TokenSerializer
+    UserSerializer, UserCreateSerializer, LoginSerializer, TokenSerializer,
+    ComponentConfigSerializer
 )
 from .filters import AlarmFilter
 from .permissions import IsSystemAdmin
@@ -115,3 +116,41 @@ class UserViewSet(viewsets.ModelViewSet):
         if user.username == 'admin':
             return Response({'message': '不能删除管理员账户'}, status=status.HTTP_403_FORBIDDEN)
         return super().destroy(request, *args, **kwargs)
+
+
+class ComponentConfigViewSet(viewsets.ViewSet):
+    """
+    Component config for FH2 public params (single record storage)
+    """
+    permission_classes = [permissions.IsAuthenticated, IsSystemAdmin]
+
+    def get_object(self):
+        obj, _ = ComponentConfig.objects.get_or_create(id=1)
+        return obj
+
+    def list(self, request):
+        obj = self.get_object()
+        serializer = ComponentConfigSerializer(obj)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        obj = self.get_object()
+        serializer = ComponentConfigSerializer(obj)
+        return Response(serializer.data)
+
+    def update(self, request, pk=None):
+        obj = self.get_object()
+        serializer = ComponentConfigSerializer(obj, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def partial_update(self, request, pk=None):
+        obj = self.get_object()
+        serializer = ComponentConfigSerializer(obj, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
