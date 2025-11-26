@@ -32,6 +32,11 @@
             <span class="nav-label">告警统计</span>
           </router-link>
           
+          <router-link to="/carousel-detection" class="nav-item" :class="{ active: $route.path === '/carousel-detection' }">
+            <span class="nav-icon">🖼️</span>
+            <span class="nav-label">轮播检测</span>
+          </router-link>
+          
           
           <router-link v-if="isAdmin" to="/user-management" class="nav-item" :class="{ active: $route.path === '/user-management' }">
             <span class="nav-icon">👥</span>

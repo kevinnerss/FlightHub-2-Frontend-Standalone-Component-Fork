@@ -7,6 +7,7 @@ const DjiDashboard = () => import('../views/DjiDashboard.vue')
 const AlarmManagement = () => import('../views/AlarmManagement.vue')
 const AlarmStats = () => import('../views/AlarmStats.vue')
 const ComponentConfig = () => import('../views/ComponentConfig.vue')
+const CarouselDetection = () => import('../views/CarouselDetection.vue')
 
 const routes = [
   {
@@ -71,6 +72,15 @@ const routes = [
     }
   },
 
+  {
+    path: '/carousel-detection',
+    name: 'CarouselDetection',
+    component: CarouselDetection,
+    meta: {
+      title: '\u8f6e\u64ad\u68c0\u6d4b',
+      requiresAuth: true
+    }
+  },
   
   // 404 page
   {

@@ -145,6 +145,40 @@ class Alarm(models.Model):
         return f"Alarm {self.id} - {self.category.name}"
 
 
+class WaylineImage(models.Model):
+    """
+    航线图片表
+    存储每条航线的图片素材（可来源于告警或手动上传）
+    """
+    wayline = models.ForeignKey(
+        Wayline,
+        on_delete=models.CASCADE,
+        related_name='images',
+        verbose_name="关联航线"
+    )
+    alarm = models.ForeignKey(
+        'Alarm',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='wayline_images',
+        verbose_name="关联告警"
+    )
+    image_url = models.URLField(max_length=500, verbose_name="图片链接")
+    title = models.CharField(max_length=120, blank=True, null=True, verbose_name="标题")
+    description = models.TextField(blank=True, null=True, verbose_name="描述")
+    extra_data = models.JSONField(blank=True, null=True, verbose_name="扩展信息")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        verbose_name = "航线图片"
+        verbose_name_plural = "航线图片"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"航线图片 {self.id} - {self.wayline.name if self.wayline else '未知航线'}"
+
+
 class UserProfile(models.Model):
     """用户扩展信息表"""
     user = models.OneToOneField(

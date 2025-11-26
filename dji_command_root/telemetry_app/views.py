@@ -7,13 +7,13 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from rest_framework.authtoken.models import Token
 
-from .models import Alarm, AlarmCategory, Wayline, UserProfile, ComponentConfig
+from .models import Alarm, AlarmCategory, Wayline, UserProfile, ComponentConfig, WaylineImage
 from .serializers import (
     AlarmSerializer, AlarmCategorySerializer, WaylineSerializer,
     UserSerializer, UserCreateSerializer, LoginSerializer, TokenSerializer,
-    ComponentConfigSerializer
+    ComponentConfigSerializer, WaylineImageSerializer
 )
-from .filters import AlarmFilter
+from .filters import AlarmFilter, WaylineImageFilter
 from .permissions import IsSystemAdmin
 
 
@@ -49,6 +49,19 @@ class WaylineViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     search_fields = ['wayline_id', 'name', 'description', 'created_by']
     ordering_fields = ['created_at', 'updated_at', 'status', 'name']
+    ordering = ['-created_at']
+
+
+class WaylineImageViewSet(viewsets.ModelViewSet):
+    """
+    航线图片管理
+    """
+    queryset = WaylineImage.objects.select_related('wayline', 'alarm').all()
+    serializer_class = WaylineImageSerializer
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = WaylineImageFilter
+    search_fields = ['title', 'description', 'wayline__name', 'wayline__wayline_id']
+    ordering_fields = ['created_at']
     ordering = ['-created_at']
 
 

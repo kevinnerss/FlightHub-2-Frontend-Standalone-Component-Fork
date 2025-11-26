@@ -2,7 +2,7 @@
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from rest_framework.authtoken.models import Token
-from .models import Alarm, AlarmCategory, Wayline, UserProfile, ComponentConfig
+from .models import Alarm, AlarmCategory, Wayline, UserProfile, ComponentConfig, WaylineImage
 
 
 class WaylineSerializer(serializers.ModelSerializer):
@@ -50,6 +50,18 @@ class AlarmSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'category': {'write_only': True, 'required': True}
         }
+
+
+class WaylineImageSerializer(serializers.ModelSerializer):
+    wayline_details = WaylineSerializer(source='wayline', read_only=True)
+
+    class Meta:
+        model = WaylineImage
+        fields = [
+            'id', 'wayline', 'wayline_details', 'alarm', 'image_url',
+            'title', 'description', 'extra_data', 'created_at'
+        ]
+        read_only_fields = ['created_at']
 
 
 class UserSerializer(serializers.ModelSerializer):

@@ -1,6 +1,5 @@
 <template>
   <div class="config-page">
-    <!-- 页面头部 -->
     <div class="page-header-premium">
       <div class="header-content">
         <div class="header-left">
@@ -27,7 +26,6 @@
       </div>
     </div>
 
-    <!-- 配置表单 -->
     <div class="config-content">
       <el-card class="config-card" shadow="hover">
         <div class="card-header">
@@ -36,6 +34,7 @@
             <p class="card-subtitle">与官方 demo 一致的 FH2 配置（serverUrl / wssUrl / hostUrl / prjId / projectToken）</p>
           </div>
           <div class="meta-text" v-if="lastUpdated">
+            <span class="dot"></span>
             上次保存时间：{{ lastUpdated }}
           </div>
         </div>
@@ -59,7 +58,11 @@
             </el-col>
             <el-col :span="12">
               <el-form-item label="wssUrl" prop="wssUrl">
-                <el-input v-model="form.wssUrl" placeholder="例如 ws://127.0.0.1:30812/duplex/web" clearable />
+                <el-input
+                  v-model="form.wssUrl"
+                  placeholder="例如 ws://127.0.0.1:30812/duplex/web"
+                  clearable
+                />
               </el-form-item>
             </el-col>
           </el-row>
@@ -110,9 +113,6 @@
           </el-row>
         </el-form>
       </el-card>
-
-      <div class="footer-actions">
-      </div>
     </div>
   </div>
 </template>
@@ -178,7 +178,6 @@ export default {
       if (this.saving) return
       this.saving = true
       try {
-        // 校验 extra_params JSON
         let extraParams = this.form.extra_params
         if (extraParams && typeof extraParams === 'string') {
           try {
@@ -217,18 +216,33 @@ export default {
   margin: 0 auto;
   padding: 0 0 32px 0;
   color: #e2e8f0;
+  position: relative;
+}
+
+.config-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(56, 189, 248, 0.12), transparent 45%),
+    radial-gradient(circle at 85% 10%, rgba(94, 234, 212, 0.14), transparent 40%);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.8;
 }
 
 .page-header-premium {
   margin: 24px 0;
+  position: relative;
+  z-index: 1;
 }
 
 .header-content {
   padding: 24px 28px;
-  background: rgba(26, 31, 58, 0.6);
+  background: linear-gradient(135deg, rgba(26, 31, 58, 0.85), rgba(20, 25, 46, 0.9));
   border-radius: 16px;
-  border: 1px solid rgba(14, 165, 233, 0.4);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(14, 165, 233, 0.35);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.03);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -265,23 +279,33 @@ export default {
 .header-text .page-subtitle {
   margin: 6px 0 0 0;
   color: #94a3b8;
+  line-height: 1.6;
 }
 
 .header-actions {
   display: flex;
   gap: 12px;
+  align-items: center;
 }
 
 .config-content {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  position: relative;
+  z-index: 1;
 }
 
 .config-card {
-  background: rgba(26, 31, 58, 0.6);
-  border: 1px solid rgba(14, 165, 233, 0.2);
-  border-radius: 16px;
+  background: rgba(20, 25, 46, 0.82);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: 18px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+:deep(.el-card__body) {
+  padding: 20px 24px 24px;
 }
 
 .card-header {
@@ -289,6 +313,7 @@ export default {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+  gap: 12px;
 }
 
 .card-header h3 {
@@ -301,15 +326,117 @@ export default {
   margin: 4px 0 0 0;
   color: #94a3b8;
   font-size: 13px;
+  line-height: 1.6;
 }
 
 .meta-text {
-  color: #cbd5e1;
+  color: #67e8f9;
   font-size: 12px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.meta-text .dot {
+  width: 8px;
+  height: 8px;
+  background: #22d3ee;
+  border-radius: 50%;
+  box-shadow: 0 0 0 6px rgba(34, 211, 238, 0.18);
 }
 
 .config-form {
   margin-top: 12px;
 }
 
+:deep(.el-form-item) {
+  margin-bottom: 18px;
+}
+
+:deep(.el-form-item__label) {
+  color: #cbd5e1;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+:deep(.el-form-item__content) {
+  align-items: center;
+}
+
+:deep(.el-form-item__error) {
+  color: #fca5a5;
+}
+
+:deep(.el-input__wrapper) {
+  background: radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.08), transparent 45%),
+    rgba(10, 12, 26, 0.9);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 10px 28px rgba(0, 0, 0, 0.35);
+  border-radius: 12px;
+  padding: 10px 12px;
+  transition: all 0.2s ease;
+}
+
+:deep(.el-input__wrapper.is-focus),
+:deep(.el-input__wrapper:hover) {
+  border-color: #22d3ee;
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.45),
+    0 0 0 6px rgba(34, 211, 238, 0.12),
+    0 14px 32px rgba(0, 0, 0, 0.4);
+}
+
+:deep(.el-input__inner),
+:deep(.el-textarea__inner) {
+  color: #e2e8f0;
+}
+
+:deep(.el-input__inner::placeholder),
+:deep(.el-textarea__inner::placeholder) {
+  color: #64748b;
+}
+
+:deep(.el-input__suffix),
+:deep(.el-input__prefix) {
+  color: #cbd5e1;
+}
+
+:deep(.el-textarea__inner) {
+  background: rgba(10, 12, 26, 0.9);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 10px 28px rgba(0, 0, 0, 0.35);
+  border-radius: 12px;
+  transition: all 0.2s ease;
+  padding: 12px;
+}
+
+:deep(.el-textarea__inner:focus),
+:deep(.el-textarea__inner:hover) {
+  border-color: #22d3ee;
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.45),
+    0 0 0 6px rgba(34, 211, 238, 0.12),
+    0 14px 32px rgba(0, 0, 0, 0.4);
+}
+
+:deep(.el-button--primary) {
+  background: linear-gradient(135deg, #0ea5e9, #22d3ee);
+  border: 1px solid rgba(14, 165, 233, 0.7);
+  box-shadow: 0 8px 24px rgba(14, 165, 233, 0.3);
+}
+
+:deep(.el-button--success) {
+  background: linear-gradient(135deg, #10b981, #34d399);
+  border: 1px solid rgba(16, 185, 129, 0.7);
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.25);
+}
+
+:deep(.el-button) {
+  border-radius: 10px;
+}
 </style>

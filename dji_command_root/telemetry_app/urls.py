@@ -1,14 +1,21 @@
-# telemetry_app/urls.py
-
+﻿# telemetry_app/urls.py
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-# 导入所�?ViewSet
-from .views import AlarmViewSet, AlarmCategoryViewSet, WaylineViewSet, AuthViewSet, UserViewSet, ComponentConfigViewSet
+from .views import (
+    AlarmViewSet,
+    AlarmCategoryViewSet,
+    WaylineViewSet,
+    WaylineImageViewSet,
+    AuthViewSet,
+    UserViewSet,
+    ComponentConfigViewSet,
+)
 
 router = DefaultRouter()
 router.register(r'alarms', AlarmViewSet)
 router.register(r'alarm-categories', AlarmCategoryViewSet, basename='alarmcategory')
-router.register(r'waylines', WaylineViewSet)  # 注册航线视图�?
+router.register(r'waylines', WaylineViewSet)
+router.register(r'wayline-images', WaylineImageViewSet, basename='waylineimage')
 router.register(r'auth', AuthViewSet, basename='auth')
 router.register(r'users', UserViewSet, basename='user')
 router.register(r'component-config', ComponentConfigViewSet, basename='componentconfig')
