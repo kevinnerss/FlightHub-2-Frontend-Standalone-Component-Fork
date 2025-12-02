@@ -10,7 +10,7 @@ from .views import (
     UserViewSet,
     ComponentConfigViewSet,
 )
-
+from . import views
 router = DefaultRouter()
 router.register(r'alarms', AlarmViewSet)
 router.register(r'alarm-categories', AlarmCategoryViewSet, basename='alarmcategory')
@@ -19,7 +19,7 @@ router.register(r'wayline-images', WaylineImageViewSet, basename='waylineimage')
 router.register(r'auth', AuthViewSet, basename='auth')
 router.register(r'users', UserViewSet, basename='user')
 router.register(r'component-config', ComponentConfigViewSet, basename='componentconfig')
-
+router.register(r'test/webhook', views.WebhookTestViewSet, basename='test-webhook')
 urlpatterns = [
     path('', include(router.urls)),
 ]

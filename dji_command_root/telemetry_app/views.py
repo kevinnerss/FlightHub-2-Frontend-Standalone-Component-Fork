@@ -159,6 +159,41 @@ class ComponentConfigViewSet(viewsets.ViewSet):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
+# ... (上面是你原本的代码)
+
+class WebhookTestViewSet(viewsets.ViewSet):
+    """
+    【测试专用】用于接收 EMQX 或 司空2 推送的 Webhook 数据
+    访问地址示例: http://<IP>:8000/api/test/webhook/receive/
+    """
+    # ⚠️ 关键点：因为是大疆/EMQX服务器发起的请求，它们没有登录Token，必须允许 AllowAny
+    permission_classes = [permissions.AllowAny]
+
+    @action(detail=False, methods=['post'], url_path='receive')
+    def receive_data(self, request):
+        import json
+
+        print("\n" + "🔥" * 10 + " [Django] 收到 Webhook 数据 " + "🔥" * 10)
+
+        try:
+            # request.data 是 DRF 自动解析后的 JSON 数据
+            data = request.data
+
+            # 在控制台漂亮的打印出来
+            print(json.dumps(data, indent=4, ensure_ascii=False))
+
+            # 如果你想顺便看一眼 request headers，取消下面这行的注释
+            # print("Headers:", request.headers)
+
+        except Exception as e:
+            print(f"❌ 数据解析异常: {str(e)}")
+            print(f"原始数据: {request.body}")
+
+        print("🔥" * 25 + "\n")
+
+        # 必须返回 200 OK，否则司空/EMQX 可能会认为发送失败而重试
+        return Response({'code': 200, 'msg': 'Django接收成功'}, status=status.HTTP_200_OK)
     def partial_update(self, request, pk=None):
         obj = self.get_object()
         serializer = ComponentConfigSerializer(obj, data=request.data, partial=True)
