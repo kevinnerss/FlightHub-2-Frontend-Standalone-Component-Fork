@@ -1,16 +1,12 @@
 """
-WSGI config for dji_command_center project.
-
-It exposes the WSGI callable as a module-level variable named ``application``.
-
-For more information on this file, see
-https://docs.djangoproject.com/en/4.2/howto/deployment/wsgi/
+ASGI config for dji_command_root project.
 """
 
 import os
 
 from django.core.wsgi import get_wsgi_application
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "dji_command_center.settings")
+# 【核心修改点】将 dji_command_center 修正为 dji_command_root
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "dji_command_root.settings")
 
 application = get_wsgi_application()

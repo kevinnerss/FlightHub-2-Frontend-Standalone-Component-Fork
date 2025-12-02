@@ -10,8 +10,8 @@ TEST_CREDENTIALS = {
     "username": "admin",
     "password": "admin123"
 }
-TEST_INVALID_CREDENTIALS = {
     "username": "admin",
+TEST_INVALID_CREDENTIALS = {
     "password": "wrongpassword"
 }
 

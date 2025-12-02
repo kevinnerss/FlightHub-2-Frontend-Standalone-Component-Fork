@@ -8,6 +8,7 @@ module.exports = {
       new webpack.DefinePlugin({
         CESIUM_BASE_URL: JSON.stringify('./cesium')
       }),
+      // 这里是你手动加的，用于复制 Cesium 资源，保持不变
       new CopyWebpackPlugin({
         patterns: [
           {
@@ -17,6 +18,7 @@ module.exports = {
         ]
       })
     ],
+    // ... 其他 module/resolve 配置保持不变 ...
     module: {
       rules: [
         {
@@ -37,14 +39,20 @@ module.exports = {
       }
     }
   },
+  
+  // ---【修改重点在这里】---
   chainWebpack: config => {
+
+
+    // ... 原有的 Cesium 配置继续往下写 ...
     config.resolve.alias
       .set('cesium', path.resolve(__dirname, 'node_modules/cesium'))
     
     // 移除cesium的prefetch
     config.plugins.delete('prefetch')
     
-    // 静态资源处理 - 使用更兼容的方式
+    // ... 原有的 rule 配置保持不变 ...
+    // 静态资源处理
     config.module
       .rule('copyCesiumAssets')
       .test(/Assets[\/\\]/)
@@ -53,9 +61,7 @@ module.exports = {
         .end()
       .use('file-loader')
         .loader('file-loader')
-        .options({
-          name: 'cesium/Assets/[name][ext]'
-        })
+        .options({ name: 'cesium/Assets/[name][ext]' })
     
     // Workers处理
     config.module
@@ -66,9 +72,7 @@ module.exports = {
         .end()
       .use('file-loader')
         .loader('file-loader')
-        .options({
-          name: 'cesium/Workers/[name][ext]'
-        })
+        .options({ name: 'cesium/Workers/[name][ext]' })
     
     // ThirdParty处理
     config.module
@@ -79,9 +83,7 @@ module.exports = {
         .end()
       .use('file-loader')
         .loader('file-loader')
-        .options({
-          name: 'cesium/ThirdParty/[name][ext]'
-        })
+        .options({ name: 'cesium/ThirdParty/[name][ext]' })
       
     // 处理Widgets的CSS
     config.module
@@ -95,14 +97,12 @@ module.exports = {
         .end()
   },
   devServer: {
-    // 配置静态资源目录
     static: {
       directory: path.join(__dirname, 'public')
     },
-    // 代理配置（如果需要与后端通信）
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000', // 根据实际后端地址调整
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true
       }
     }
