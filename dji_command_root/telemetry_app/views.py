@@ -6,7 +6,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from rest_framework.authtoken.models import Token
-
+import json
 from .models import Alarm, AlarmCategory, Wayline, UserProfile, ComponentConfig, WaylineImage
 from .serializers import (
     AlarmSerializer, AlarmCategorySerializer, WaylineSerializer,
@@ -165,35 +165,44 @@ class ComponentConfigViewSet(viewsets.ViewSet):
 class WebhookTestViewSet(viewsets.ViewSet):
     """
     【测试专用】用于接收 EMQX 或 司空2 推送的 Webhook 数据
-    访问地址示例: http://<IP>:8000/api/test/webhook/receive/
+    配置填写的 URL: http://<服务器IP>/api/test/webhook/receive/
     """
-    # ⚠️ 关键点：因为是大疆/EMQX服务器发起的请求，它们没有登录Token，必须允许 AllowAny
+    # 允许任何 IP 调用 (司空服务器可能没有 Token)
     permission_classes = [permissions.AllowAny]
 
-    @action(detail=False, methods=['post'], url_path='receive')
+    @action(detail=False, methods=['post', 'get'], url_path='receive')
     def receive_data(self, request):
-        import json
+        """
+        接收司空2 Webhook 推送
+        """
+        # 1. 如果是 GET 请求，通常是浏览器访问测试
+        if request.method == 'GET':
+            return Response({'msg': 'Webhook 接口正常运行中，请在司空配置 POST 请求。'}, status=status.HTTP_200_OK)
 
-        print("\n" + "🔥" * 10 + " [Django] 收到 Webhook 数据 " + "🔥" * 10)
-
+        # 2. 处理 POST 请求
         try:
-            # request.data 是 DRF 自动解析后的 JSON 数据
+            # 获取原始数据
             data = request.data
 
-            # 在控制台漂亮的打印出来
+            # --- 打印日志，方便现场调试 ---
+            print("\n" + "🔥" * 10 + " [Django Webhook] 收到数据 " + "🔥" * 10)
             print(json.dumps(data, indent=4, ensure_ascii=False))
+            print("🔥" * 30 + "\n")
 
-            # 如果你想顺便看一眼 request headers，取消下面这行的注释
-            # print("Headers:", request.headers)
+            # 3. (可选) 司空握手验证
+            # 如果收到含有 challenge 的包，原样返回即可通过验证
+            if 'challenge' in data:
+                return Response({'challenge': data['challenge']}, status=status.HTTP_200_OK)
+
+            # 4. 你的业务逻辑 (例如设备上线存库)
+            # if data.get('type') == 'device_online':
+            #     save_device_status(data)
+
+            return Response({'code': 200, 'msg': '接收成功'}, status=status.HTTP_200_OK)
 
         except Exception as e:
-            print(f"❌ 数据解析异常: {str(e)}")
-            print(f"原始数据: {request.body}")
-
-        print("🔥" * 25 + "\n")
-
-        # 必须返回 200 OK，否则司空/EMQX 可能会认为发送失败而重试
-        return Response({'code': 200, 'msg': 'Django接收成功'}, status=status.HTTP_200_OK)
+            print(f"❌ Webhook 处理异常: {str(e)}")
+            return Response({'code': 500, 'msg': '数据解析失败'}, status=status.HTTP_400_BAD_REQUEST)
     def partial_update(self, request, pk=None):
         obj = self.get_object()
         serializer = ComponentConfigSerializer(obj, data=request.data, partial=True)
