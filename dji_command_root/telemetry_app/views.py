@@ -204,23 +204,23 @@ from rest_framework.response import Response
 webhook_queue = Queue()
 processed_event_ids = set()
 
-
+from rest_framework.permissions import AllowAny, IsAuthenticated
 class MediaLibraryViewSet(viewsets.ViewSet):
     """
     管理媒体文件夹路径并提供媒体文件列表/静态资源访问。
     """
-    permission_classes = [permissions.IsAuthenticated]
 
+    permission_classes = [AllowAny]
     image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
     video_extensions = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.mpeg', '.mpg'}
 
     def get_permissions(self):
-        if self.action == 'serve':
-            return [permissions.AllowAny()]
+        # 保持你原本的逻辑：修改配置时需要管理员权限
         if self.action == 'config' and getattr(self, 'request', None):
             if self.request.method in ['PUT', 'PATCH', 'POST']:
                 return [permissions.IsAuthenticated(), IsSystemAdmin()]
-        return [permissions.IsAuthenticated()]
+        # 其他操作（list, serve, get config）全部放行
+        return [AllowAny()]
 
     def get_config(self):
         obj, _ = MediaFolderConfig.objects.get_or_create(id=1)

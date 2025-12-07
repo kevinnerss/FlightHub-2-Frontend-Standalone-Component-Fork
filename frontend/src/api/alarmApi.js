@@ -12,7 +12,11 @@ const api = axios.create({
 // 请求拦截器
 api.interceptors.request.use(
   config => {
-    // 可以在这里添加token等认证信息
+    // 携带登录 token，防止需要认证的请求返回 401
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers.Authorization = `Token ${token}`
+    }
     return config
   },
   error => {
