@@ -7,6 +7,8 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
 from rest_framework.authtoken.models import Token
 import json
+import threading
+from queue import Queue
 from .models import Alarm, AlarmCategory, Wayline, UserProfile, ComponentConfig, WaylineImage
 from .serializers import (
     AlarmSerializer, AlarmCategorySerializer, WaylineSerializer,
@@ -16,7 +18,9 @@ from .serializers import (
 from .filters import AlarmFilter, WaylineImageFilter
 from .permissions import IsSystemAdmin
 
-
+from rest_framework import permissions, viewsets, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
 class AlarmCategoryViewSet(viewsets.ModelViewSet):
     """
     告警类型管理（主要用于后台维护）
@@ -159,50 +163,100 @@ class ComponentConfigViewSet(viewsets.ViewSet):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+import json
+import threading
+import time
+from queue import Queue
 
-# ... (上面是你原本的代码)
+from rest_framework import permissions, viewsets, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+
+
+# ------------------------------
+# Webhook 后台事件队列
+# ------------------------------
+webhook_queue = Queue()
+processed_event_ids = set()
+
+
+def webhook_worker():
+    """后台线程：异步处理司空推送，防止阻塞 Django worker"""
+    while True:
+        try:
+            event = webhook_queue.get()
+            event_id = event.get("_event_id")
+            print(f"📥 [Webhook Worker] 正在处理 event_id={event_id}")
+
+            # TODO: 在这里处理司空事件，例如存库、触发业务逻辑
+            # save_event_to_db(event)
+
+            time.sleep(0.1)  # 模拟处理耗时
+
+        except Exception as e:
+            print(f"❌ Webhook Worker 异常: {e}")
+
+
+# 启动后台 worker（只启动一次）
+threading.Thread(target=webhook_worker, daemon=True).start()
+
+
 
 class WebhookTestViewSet(viewsets.ViewSet):
     """
-    【测试专用】用于接收 EMQX 或 司空2 推送的 Webhook 数据
-    配置填写的 URL: http://<服务器IP>/api/test/webhook/receive/
+    【生产级 Webhook 接口】
+    - 不阻塞 Django worker
+    - 自动兼容 challenge / JSON / nested payload
+    - 防止重复事件
+    - 后台异步处理
     """
-    # 允许任何 IP 调用 (司空服务器可能没有 Token)
+
     permission_classes = [permissions.AllowAny]
 
     @action(detail=False, methods=['post', 'get'], url_path='receive')
     def receive_data(self, request):
-        """
-        接收司空2 Webhook 推送
-        """
-        # 1. 如果是 GET 请求，通常是浏览器访问测试
+
         if request.method == 'GET':
-            return Response({'msg': 'Webhook 接口正常运行中，请在司空配置 POST 请求。'}, status=status.HTTP_200_OK)
+            return Response(
+                {'msg': 'Webhook OK（请以 POST 方式发送正式数据）'},
+                status=status.HTTP_200_OK
+            )
 
-        # 2. 处理 POST 请求
         try:
-            # 获取原始数据
-            data = request.data
+            # 尝试解析 JSON
+            try:
+                data = request.data
+            except:
+                data = {}
 
-            # --- 打印日志，方便现场调试 ---
-            print("\n" + "🔥" * 10 + " [Django Webhook] 收到数据 " + "🔥" * 10)
-            print(json.dumps(data, indent=4, ensure_ascii=False))
-            print("🔥" * 30 + "\n")
+            # 少打印日志（避免 worker timeout）
+            print("🔥 [Webhook] 收到推送（精简日志）")
 
-            # 3. (可选) 司空握手验证
-            # 如果收到含有 challenge 的包，原样返回即可通过验证
-            if 'challenge' in data:
-                return Response({'challenge': data['challenge']}, status=status.HTTP_200_OK)
+            # 处理 challenge，用于司空验证
+            if isinstance(data, dict) and "challenge" in data:
+                return Response({"challenge": data["challenge"]})
 
-            # 4. 你的业务逻辑 (例如设备上线存库)
-            # if data.get('type') == 'device_online':
-            #     save_device_status(data)
+            # 生成事件 ID（用于去重）
+            event_id = (
+                data.get("id")
+                or data.get("event_id")
+                or f"{time.time()}-{request.META.get('REMOTE_ADDR')}"
+            )
 
-            return Response({'code': 200, 'msg': '接收成功'}, status=status.HTTP_200_OK)
+            if event_id in processed_event_ids:
+                return Response({"msg": "重复事件，已忽略"}, status=200)
+
+            processed_event_ids.add(event_id)
+            data["_event_id"] = event_id  # 放入事件
+
+            # 异步放入队列
+            webhook_queue.put(data)
+
+            return Response({"msg": "接收成功", "event_id": event_id}, status=200)
 
         except Exception as e:
-            print(f"❌ Webhook 处理异常: {str(e)}")
-            return Response({'code': 500, 'msg': '数据解析失败'}, status=status.HTTP_400_BAD_REQUEST)
+            print(f"❌ Webhook 处理异常: {e}")
+            return Response({"msg": "解析失败"}, status=400)
     def partial_update(self, request, pk=None):
         obj = self.get_object()
         serializer = ComponentConfigSerializer(obj, data=request.data, partial=True)

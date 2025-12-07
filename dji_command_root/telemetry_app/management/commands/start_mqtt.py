@@ -2,169 +2,195 @@ import json
 import os
 import time
 import requests
+import threading
+from queue import Queue
 import paho.mqtt.client as mqtt
 from django.core.management.base import BaseCommand
 from django.conf import settings
 import urllib3
 
-# 禁用 HTTPS 不安全警告 (因为司空私有化可能用自签名证书，内网下载必须忽略 SSL)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
+# ------------------------------
+# 🔍 强健的文件事件解析器（关键）
+# ------------------------------
+def extract_file_info(data):
+    """
+    自动识别司空可能推送的所有文件格式变化
+    返回: (file_name, url) 或 (None, None)
+    """
+
+    if not isinstance(data, dict):
+        return None, None
+
+    # --- 1. 标准结构 method=fileupload_callback ---
+    if data.get("method") == "fileupload_callback":
+        inner = data.get("data", {})
+        return inner.get("file_name"), inner.get("url")
+
+    # --- 2. file_id + url 格式 ---
+    if "file_id" in data and "url" in data:
+        name = data.get("file_name") or f"{data['file_id']}.bin"
+        return name, data["url"]
+
+    # --- 3. object_key 附带路径 ---
+    if "object_key" in data:
+        fname = os.path.basename(data["object_key"])
+        return fname, data.get("url")
+
+    # --- 4. 可能包裹在 data/payload/file 等字段 ---
+    for key in ["data", "payload", "file"]:
+        if isinstance(data.get(key), dict):
+            name, url = extract_file_info(data[key])
+            if name and url:
+                return name, url
+
+    # --- 5. 深层递归搜索 ---
+    for v in data.values():
+        if isinstance(v, dict):
+            name, url = extract_file_info(v)
+            if name and url:
+                return name, url
+
+    return None, None
+
+
+# ======================================================================
+# ⭐ 主类：MQTT 监听
+# ======================================================================
 class Command(BaseCommand):
-    help = '启动 MQTT 监听服务，接收司空数据并自动下载媒体文件'
+    help = "MQTT Worker：监听司空并下载媒体文件（增强稳定版）"
 
+    def __init__(self):
+        super().__init__()
+        self.download_queue = Queue()
+        self.processed_message_ids = set()  # 防重复消息处理
+
+    # ======================================================
+    # 启动 Worker线程
+    # ======================================================
+    def start_worker_thread(self):
+        def worker():
+            while True:
+                try:
+                    file_name, file_url = self.download_queue.get()
+                    self.safe_download(file_name, file_url)
+                except Exception as e:
+                    print(f"❌ Worker线程异常: {e}")
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    # ======================================================
+    # 下载函数（带重试）
+    # ======================================================
+    def safe_download(self, file_name, file_url):
+        save_path = os.path.join(self.download_dir, file_name)
+
+        # 已存在则跳过
+        if os.path.exists(save_path) and os.path.getsize(save_path) > 0:
+            print(f"⚠️ 已存在文件，跳过下载: {file_name}")
+            return
+
+        print(f"⬇️ 准备下载: {file_name}")
+        print(f"🔗 URL: {file_url}")
+
+        for attempt in range(3):  # 至多3次
+            try:
+                with requests.get(file_url, stream=True, verify=False, timeout=15) as r:
+                    r.raise_for_status()
+                    with open(save_path, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+
+                print(f"✅ 下载成功: {save_path}")
+                return
+            except Exception as e:
+                print(f"❌ 下载失败（第 {attempt+1} 次）: {e}")
+                time.sleep(2)
+
+        print(f"🚨 彻底失败，放弃下载: {file_name}")
+
+        if os.path.exists(save_path):
+            os.remove(save_path)
+
+    # ======================================================
+    # 回调：连接成功
+    # ======================================================
+    def on_connect(self, client, userdata, flags, rc, properties=None):
+        if rc == 0:
+            print("✅ MQTT 连接成功！订阅所有主题 #")
+            client.subscribe("#", qos=1)  # ⭐ 强烈建议使用 QoS=1，避免丢消息
+        else:
+            print(f"❌ 连接失败 rc={rc}")
+
+    # ======================================================
+    # 回调：收到消息
+    # ======================================================
+    def on_message(self, client, userdata, msg):
+        print(f"📩 收到 MQTT 消息：topic={msg.topic}, payload={msg.payload[:100]!r}")
+        try:
+            payload = msg.payload.decode("utf-8")
+
+            data = json.loads(payload)
+
+            # 去重：避免重复触发
+            msg_id = data.get("id") or f"{msg.topic}-{time.time()}"
+            if msg_id in self.processed_message_ids:
+                return
+            self.processed_message_ids.add(msg_id)
+
+            # 提取文件信息
+            file_name, file_url = extract_file_info(data)
+
+            if file_name and file_url:
+                print("\n🔥🔥🔥🔥🔥 侦测到文件事件 🔥🔥🔥🔥🔥")
+                print(json.dumps(data, indent=4, ensure_ascii=False))
+
+                # 放入下载队列而不是直接下载（避免阻塞 MQTT）
+                self.download_queue.put((file_name, file_url))
+                return
+
+        except Exception as e:
+            print(f"❌ 解析消息失败: {e}")
+
+    # ======================================================
+    # 主循环
+    # ======================================================
     def handle(self, *args, **options):
-        # ================= 动态配置区域 =================
-        # 优先读取环境变量 (Docker Compose 里设置的)，如果没读取到，则使用默认值 (本地测试用)
 
-        # 1. Broker IP: 现场部署时会自动读取 docker-compose.yml 里的 DJI_BROKER_IP
-        broker_ip = os.getenv('DJI_BROKER_IP', '127.0.0.1')
+        # 读取配置
+        broker_ip = os.getenv("DJI_BROKER_IP", "emqx")
+        broker_port = int(os.getenv("DJI_BROKER_PORT", 1883))
+        username = os.getenv("DJI_BROKER_USER", "")
+        password = os.getenv("DJI_BROKER_PASSWORD", "")
 
-        # 2. Broker Port: 默认 1883
-        broker_port = int(os.getenv('DJI_BROKER_PORT', 1883))
+        self.download_dir = os.path.join(settings.MEDIA_ROOT, "dji_downloads")
+        os.makedirs(self.download_dir, exist_ok=True)
 
-        # 3. 账号密码: 现场如果变了，可以在 yaml 里改，不用改代码
-        username = os.getenv('DJI_BROKER_USER', 'dji_bridge')
-        password = os.getenv('DJI_BROKER_PASSWORD', '123456')
+        print("⚙️ 配置：")
+        print(f"  MQTT: {broker_ip}:{broker_port}")
+        print(f"  保存目录: {self.download_dir}")
 
-        # 4. 下载目录: 确保保存到 Docker 挂载的 media 卷中
-        # 默认保存到: /app/media/dji_downloads (Docker内) 或 项目根目录/media/dji_downloads (本地)
-        download_dir = os.path.join(settings.MEDIA_ROOT, 'dji_downloads')
+        # 启动后台下载线程
+        self.start_worker_thread()
 
-        # ==========================================================
-
-        self.stdout.write(self.style.WARNING(f"⚙️  配置加载完毕:"))
-        self.stdout.write(f"   - MQTT 服务器: {broker_ip}:{broker_port}")
-        self.stdout.write(f"   - 用户名: {username}")
-        self.stdout.write(f"   - 保存路径: {download_dir}")
-
-        # 确保下载目录存在
-        if not os.path.exists(download_dir):
-            os.makedirs(download_dir)
-            self.stdout.write(f"   - 已自动创建下载目录")
-
-        # 初始化 MQTT 客户端
+        # 创建客户端
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-
-        # 设置账号密码
-        if username and password:
+        if username:
             client.username_pw_set(username, password)
 
-        # 绑定回调函数
-        # 注意：这里使用 lambda 或者 functools.partial 将 download_dir 传进去，
-        # 或者直接存为 self.download_dir 供类方法使用
-        self.download_dir = download_dir
         client.on_connect = self.on_connect
         client.on_message = self.on_message
 
-        self.stdout.write(self.style.SUCCESS(f"\n🚀 正在连接 MQTT 服务器..."))
-
+        # 自动重连循环
         while True:
             try:
-                client.connect(broker_ip, broker_port, 60)
-                client.loop_forever()  # 阻塞运行
-            except KeyboardInterrupt:
-                self.stdout.write(self.style.SUCCESS("\n🛑 用户停止了监听"))
-                break
+                print("🚀 正在连接 MQTT ...")
+                client.connect(broker_ip, broker_port, keepalive=60)
+                client.loop_forever()
             except Exception as e:
-                self.stdout.write(self.style.ERROR(f"❌ 连接出错: {e}"))
-                self.stdout.write(self.style.WARNING("🔄 5秒后尝试重连..."))
+                print(f"❌ MQTT 连接异常: {e}")
+                print("🔄 5秒后重试...")
                 time.sleep(5)
-
-    def on_connect(self, client, userdata, flags, rc, properties=None):
-        """连接成功回调"""
-        if rc == 0:
-            self.stdout.write(self.style.SUCCESS('✅ 成功连接到司空 MQTT! 正在监听所有消息 (#)...'))
-            client.subscribe("#")
-        else:
-            self.stdout.write(self.style.ERROR(f'❌ 连接失败, 错误码: {rc}'))
-
-    def on_message(self, client, userdata, msg):
-        """收到消息回调"""
-        try:
-            payload = msg.payload.decode('utf-8')
-            # 尝试解析 JSON
-            data = json.loads(payload)
-
-            # --- 调试日志 (生产环境可适当减少) ---
-            # print(f"📩 [Topic: {msg.topic}] 收到数据...")
-
-            # --- 核心业务逻辑 ---
-            # 1. 检测是否为【文件上传回调】
-            method = data.get('method', '')
-
-            # 逻辑：判断是否包含文件上传的关键字段
-            # 司空2通常会有 method: 'fileupload_callback'，或者直接带 file_id 和 url
-            if method == 'fileupload_callback' or ('file_id' in str(data) and 'url' in str(data)):
-                self.stdout.write(self.style.NOTICE(f"🔍 检测到文件上传事件!"))
-                self.handle_file_upload(data)
-
-        except json.JSONDecodeError:
-            pass  # 忽略非 JSON 数据
-        except Exception as e:
-            print(f"❌ 数据处理异常: {e}")
-
-    def handle_file_upload(self, data):
-        """处理文件上传通知并下载文件"""
-        try:
-            # 这里的结构取决于司空实际发过来的 JSON，通常在 data 字段里
-            # 如果 data 是由 {'data': {...}} 这种格式包裹
-            file_data = data.get('data', data)  # 兼容两种格式
-
-            # 获取文件名，如果没有就生成一个
-            file_name = file_data.get('file_name')
-
-            # 如果没有文件名，或者是路径形式，只取最后一部分
-            if not file_name:
-                object_key = file_data.get('object_key', '')
-                if object_key:
-                    file_name = os.path.basename(object_key)
-                else:
-                    file_name = f"unknown_{int(time.time())}.mp4"
-
-            file_url = file_data.get('url')
-
-            if not file_url:
-                # 有些包可能只是进度通知，没有URL，直接忽略
-                return
-
-            local_path = os.path.join(self.download_dir, file_name)
-
-            # 防止重复下载
-            if os.path.exists(local_path):
-                self.stdout.write(f"⚠️ 文件已存在，跳过: {file_name}")
-                return
-
-            self.stdout.write(f"⬇️ 开始下载: {file_name}")
-            # self.stdout.write(f"🔗 链接: {file_url}") # 链接太长，调试时再打开
-
-            # 开始下载
-            self.download_file(file_url, local_path)
-
-        except Exception as e:
-            self.stdout.write(self.style.ERROR(f"❌ 处理文件逻辑出错: {e}"))
-
-    def download_file(self, url, save_path):
-        """流式下载文件"""
-        try:
-            # verify=False 忽略 SSL 证书错误
-            # stream=True 防止内存溢出
-            with requests.get(url, stream=True, verify=False, timeout=120) as r:
-                r.raise_for_status()
-                with open(save_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-
-            self.stdout.write(self.style.SUCCESS(f"✅ 文件下载成功: {save_path}"))
-
-            # TODO: 可以在这里调用数据库保存逻辑
-            # from telemetry_app.models import WaylineImage
-            # WaylineImage.objects.create(path=save_path, ...)
-
-        except Exception as e:
-            self.stdout.write(self.style.ERROR(f"❌ 下载失败: {e}"))
-            # 如果下载失败（例如文件只有0字节），删除它，以免影响后续重试
-            if os.path.exists(save_path):
-                os.remove(save_path)
