@@ -225,3 +225,19 @@ class ComponentConfig(models.Model):
 
     def __str__(self):
         return f"组件配置 {self.id}"
+
+
+class MediaFolderConfig(models.Model):
+    """
+    Stores the path of the media folder used for serving images and videos.
+    """
+    folder_path = models.CharField(max_length=500, blank=True, null=True, verbose_name="媒体文件夹路径")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "媒体文件夹配置"
+        verbose_name_plural = "媒体文件夹配置"
+
+    def __str__(self):
+        return f"媒体文件夹配置 {self.id or ''}"

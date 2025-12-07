@@ -2,7 +2,7 @@
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 from rest_framework.authtoken.models import Token
-from .models import Alarm, AlarmCategory, Wayline, UserProfile, ComponentConfig, WaylineImage
+from .models import Alarm, AlarmCategory, Wayline, UserProfile, ComponentConfig, WaylineImage, MediaFolderConfig
 
 
 class WaylineSerializer(serializers.ModelSerializer):
@@ -164,4 +164,14 @@ class ComponentConfigSerializer(serializers.ModelSerializer):
             'workspaceId': {'required': False, 'allow_blank': True, 'allow_null': True},
             'fh2_project_id': {'required': False, 'allow_blank': True, 'allow_null': True},
             'extra_params': {'required': False, 'allow_null': True}
+        }
+
+
+class MediaFolderConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MediaFolderConfig
+        fields = ['id', 'folder_path', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+        extra_kwargs = {
+            'folder_path': {'required': False, 'allow_blank': True, 'allow_null': True}
         }

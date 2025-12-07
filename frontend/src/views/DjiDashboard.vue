@@ -277,7 +277,18 @@ export default {
 
         // 强制resize确保canvas正确渲染
         this.viewer.resize()
+        const centerLon = 116.39; 
+        const centerLat = 39.90;
         
+        this.viewer.camera.setView({
+            // 高度设为 3000-5000 米，确保在你的 14-18 级范围内
+            destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, 4000), 
+            orientation: {
+                heading: 0,
+                pitch: Cesium.Math.toRadians(-90), // 垂直向下看
+                roll: 0
+            }
+        });
         // 加载3D Tiles模型
         try {
           this.tileset = await Cesium.Cesium3DTileset.fromUrl('/models/site_model/3dtiles/tileset.json')
@@ -329,22 +340,35 @@ export default {
       }
     },
 
-    async setupImageryLayers(Cesium) {
-      if (!this.viewer) return
-      const layers = this.viewer.imageryLayers
-      layers.removeAll()
-      try {
-        const provider = await Cesium.IonImageryProvider.fromAssetId(2)
-        layers.addImageryProvider(provider)
-      } catch (e) {
-        console.warn('Ion 底图加载失败，改用 OSM', e)
-        layers.addImageryProvider(
-          new Cesium.OpenStreetMapImageryProvider({
-            url: 'https://a.tile.openstreetmap.org/'
-          })
-        )
-      }
-    },
+async setupImageryLayers(Cesium) {
+  if (!this.viewer) return
+  const layers = this.viewer.imageryLayers
+  layers.removeAll()
+
+  const offlineUrl = this.componentConfig?.offline_tiles_url
+    || process.env.VUE_APP_OFFLINE_TILES_URL
+    // || '/offline-tiles/{z}/{x}/{y}.png' // 默认指向 public 下的目录
+
+  try {
+    layers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+      url: offlineUrl,
+      tilingScheme: new Cesium.WebMercatorTilingScheme(),
+      minimumLevel: 14,
+      maximumLevel: 18,
+      credit: ''
+    }))
+  } catch (e) {
+    console.warn('本地瓦片加载失败，改用在线底图', e)
+    try {
+      const provider = await Cesium.IonImageryProvider.fromAssetId(2)
+      layers.addImageryProvider(provider)
+    } catch (err) {
+      layers.addImageryProvider(new Cesium.OpenStreetMapImageryProvider({
+        url: 'https://a.tile.openstreetmap.org/'
+      }))
+    }
+  }
+},
 
     tuneCameraControls(controller) {
       if (!controller) return

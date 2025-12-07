@@ -1,21 +1,46 @@
-from rest_framework import viewsets, status, permissions
-from rest_framework.decorators import action
-from rest_framework.response import Response
-from rest_framework.filters import SearchFilter, OrderingFilter
-from django_filters.rest_framework import DjangoFilterBackend
+import json
+import mimetypes
+import os
+from datetime import datetime
+from pathlib import Path
+
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import User
+from django.core.exceptions import SuspiciousFileOperation
+from django.http import FileResponse, Http404
+from django.utils._os import safe_join
+from rest_framework.decorators import action
+from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.authtoken.models import Token
-import json
+from rest_framework.response import Response
+from rest_framework import viewsets, status, permissions
+from rest_framework.reverse import reverse
+from django_filters.rest_framework import DjangoFilterBackend
+
+from .filters import AlarmFilter, WaylineImageFilter
 import threading
 from queue import Queue
-from .models import Alarm, AlarmCategory, Wayline, UserProfile, ComponentConfig, WaylineImage
-from .serializers import (
-    AlarmSerializer, AlarmCategorySerializer, WaylineSerializer,
-    UserSerializer, UserCreateSerializer, LoginSerializer, TokenSerializer,
-    ComponentConfigSerializer, WaylineImageSerializer
+from .models import (
+    Alarm,
+    AlarmCategory,
+    Wayline,
+    UserProfile,
+    ComponentConfig,
+    WaylineImage,
+    MediaFolderConfig,
 )
-from .filters import AlarmFilter, WaylineImageFilter
+from .serializers import (
+    AlarmSerializer,
+    AlarmCategorySerializer,
+    WaylineSerializer,
+    UserSerializer,
+    UserCreateSerializer,
+    LoginSerializer,
+    TokenSerializer,
+    ComponentConfigSerializer,
+    WaylineImageSerializer,
+    MediaFolderConfigSerializer,
+)
 from .permissions import IsSystemAdmin
 
 from rest_framework import permissions, viewsets, status
@@ -180,6 +205,117 @@ webhook_queue = Queue()
 processed_event_ids = set()
 
 
+class MediaLibraryViewSet(viewsets.ViewSet):
+    """
+    管理媒体文件夹路径并提供媒体文件列表/静态资源访问。
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
+    video_extensions = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.mpeg', '.mpg'}
+
+    def get_permissions(self):
+        if self.action == 'serve':
+            return [permissions.AllowAny()]
+        if self.action == 'config' and getattr(self, 'request', None):
+            if self.request.method in ['PUT', 'PATCH', 'POST']:
+                return [permissions.IsAuthenticated(), IsSystemAdmin()]
+        return [permissions.IsAuthenticated()]
+
+    def get_config(self):
+        obj, _ = MediaFolderConfig.objects.get_or_create(id=1)
+        return obj
+
+    def list(self, request):
+        config = self.get_config()
+        folder_path = config.folder_path
+
+        if not folder_path:
+            return Response(
+                {'folder_path': folder_path, 'files': [], 'message': '媒体文件夹未配置'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not os.path.isdir(folder_path):
+            return Response(
+                {'folder_path': folder_path, 'files': [], 'message': '路径不存在或不是文件夹'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        files = []
+        try:
+            for entry in sorted(Path(folder_path).iterdir()):
+                if not entry.is_file():
+                    continue
+
+                suffix = entry.suffix.lower()
+                if suffix in self.image_extensions:
+                    media_type = 'image'
+                elif suffix in self.video_extensions:
+                    media_type = 'video'
+                else:
+                    continue
+
+                stat = entry.stat()
+                rel_path = entry.relative_to(folder_path).as_posix()
+                file_url = reverse('media-library-serve', kwargs={'path': rel_path}, request=request)
+                files.append({
+                    'name': entry.name,
+                    'path': rel_path,
+                    'type': media_type,
+                    'url': file_url,
+                    'size': stat.st_size,
+                    'modified_at': datetime.fromtimestamp(stat.st_mtime).isoformat()
+                })
+        except OSError:
+            return Response(
+                {'folder_path': folder_path, 'files': [], 'message': '读取文件夹失败'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        return Response({'folder_path': folder_path, 'files': files})
+
+    @action(detail=False, methods=['get', 'put'], url_path='config')
+    def config(self, request):
+        config = self.get_config()
+        if request.method == 'GET':
+            serializer = MediaFolderConfigSerializer(config)
+            return Response(serializer.data)
+
+        serializer = MediaFolderConfigSerializer(config, data=request.data, partial=True)
+        if serializer.is_valid():
+            folder_path = serializer.validated_data.get('folder_path')
+            if folder_path and not os.path.isdir(folder_path):
+                return Response(
+                    {'folder_path': ['路径不存在或不是文件夹']},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['get'], url_path='serve/(?P<path>.+)', permission_classes=[permissions.AllowAny])
+    def serve(self, request, path=None):
+        config = self.get_config()
+        if not config.folder_path:
+            raise Http404("媒体路径未配置")
+
+        try:
+            full_path = safe_join(config.folder_path, path)
+        except (SuspiciousFileOperation, ValueError):
+            raise Http404("非法的文件路径")
+
+        if not full_path or not os.path.isfile(full_path):
+            raise Http404("文件不存在")
+
+        response = FileResponse(open(full_path, 'rb'))
+        mime_type, _ = mimetypes.guess_type(full_path)
+        if mime_type:
+            response["Content-Type"] = mime_type
+        return response
+
+
+# ... (上面是你原本的代码)
 def webhook_worker():
     """后台线程：异步处理司空推送，防止阻塞 Django worker"""
     while True:
@@ -264,4 +400,3 @@ class WebhookTestViewSet(viewsets.ViewSet):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-

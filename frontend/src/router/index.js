@@ -8,6 +8,7 @@ const AlarmManagement = () => import('../views/AlarmManagement.vue')
 const AlarmStats = () => import('../views/AlarmStats.vue')
 const ComponentConfig = () => import('../views/ComponentConfig.vue')
 const CarouselDetection = () => import('../views/CarouselDetection.vue')
+const MediaLibrary = () => import('../views/ceshi.vue')
 
 const routes = [
   {
@@ -78,6 +79,16 @@ const routes = [
     component: CarouselDetection,
     meta: {
       title: '\u8f6e\u64ad\u68c0\u6d4b',
+      requiresAuth: true
+    }
+  },
+
+  {
+    path: '/media-library',
+    name: 'MediaLibrary',
+    component: MediaLibrary,
+    meta: {
+      title: '\u5a92\u4f53\u6587\u4ef6\u5e93',
       requiresAuth: true
     }
   },

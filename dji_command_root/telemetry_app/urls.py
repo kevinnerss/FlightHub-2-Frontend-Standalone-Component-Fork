@@ -9,6 +9,7 @@ from .views import (
     AuthViewSet,
     UserViewSet,
     ComponentConfigViewSet,
+    MediaLibraryViewSet,
 )
 from . import views
 router = DefaultRouter()
@@ -19,6 +20,7 @@ router.register(r'wayline-images', WaylineImageViewSet, basename='waylineimage')
 router.register(r'auth', AuthViewSet, basename='auth')
 router.register(r'users', UserViewSet, basename='user')
 router.register(r'component-config', ComponentConfigViewSet, basename='componentconfig')
+router.register(r'media-library', MediaLibraryViewSet, basename='media-library')
 router.register(r'test/webhook', views.WebhookTestViewSet, basename='test-webhook')
 urlpatterns = [
     path('', include(router.urls)),

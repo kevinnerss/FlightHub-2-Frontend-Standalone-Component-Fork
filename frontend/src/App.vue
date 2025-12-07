@@ -36,6 +36,11 @@
             <span class="nav-icon">🖼️</span>
             <span class="nav-label">轮播检测</span>
           </router-link>
+
+          <router-link to="/media-library" class="nav-item" :class="{ active: $route.path === '/media-library' }">
+            <span class="nav-icon">🎞️</span>
+            <span class="nav-label">媒体库</span>
+          </router-link>
           
           
           <router-link v-if="isAdmin" to="/user-management" class="nav-item" :class="{ active: $route.path === '/user-management' }">
