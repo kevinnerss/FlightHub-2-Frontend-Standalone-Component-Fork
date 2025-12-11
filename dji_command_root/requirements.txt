@@ -8,4 +8,4 @@ sqlparse==0.5.3
 typing_extensions==4.15.0
 django-filter
 requests==2.31.0
-gunicorn  #
+gunicorn==21.2.0  #

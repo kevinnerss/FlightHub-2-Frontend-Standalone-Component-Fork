@@ -10,6 +10,7 @@ from .views import (
     UserViewSet,
     ComponentConfigViewSet,
     MediaLibraryViewSet,
+    InspectTaskViewSet,
 )
 from . import views
 router = DefaultRouter()
@@ -22,6 +23,7 @@ router.register(r'users', UserViewSet, basename='user')
 router.register(r'component-config', ComponentConfigViewSet, basename='componentconfig')
 router.register(r'media-library', MediaLibraryViewSet, basename='media-library')
 router.register(r'test/webhook', views.WebhookTestViewSet, basename='test-webhook')
+router.register(r'inspect-tasks', InspectTaskViewSet, basename='inspect-task')
 urlpatterns = [
     path('', include(router.urls)),
 ]

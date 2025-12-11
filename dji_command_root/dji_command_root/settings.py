@@ -120,3 +120,19 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
+# ==== MinIO / 对象存储配置 ====
+#MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "http://192.168.10.10:9000")
+MINIO_ENDPOINT = "http://127.0.0.1:9000"
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "StrongPassw0rd!")
+MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "dji")
+MINIO_REGION = os.getenv("MINIO_REGION", "us-east-1")
+
+# ==== FastAPI 算法服务配置 ====
+# 假设 FastAPI 部署在内网，例如 http://192.168.10.20:8000
+FASTAPI_DETECT_URL = os.getenv(
+    "FASTAPI_DETECT_URL",
+    "http://192.168.10.20:8000/api/v1/detect-task"
+)
