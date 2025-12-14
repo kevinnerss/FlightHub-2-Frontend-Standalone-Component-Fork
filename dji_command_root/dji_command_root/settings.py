@@ -134,5 +134,5 @@ MINIO_REGION = os.getenv("MINIO_REGION", "us-east-1")
 # 假设 FastAPI 部署在内网，例如 http://192.168.10.20:8000
 FASTAPI_DETECT_URL = os.getenv(
     "FASTAPI_DETECT_URL",
-    "http://192.168.10.20:8000/api/v1/detect-task"
+    "http://localhost:8088/detect"
 )

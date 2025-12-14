@@ -8,9 +8,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from queue import Queue
 # views.py
-
+import uuid
 # 1. 保持 Python 原生导入不变
 from datetime import datetime, timezone
+# --- 请确保 views.py 顶部包含这些引用 ---
+import json
+import re
+import os
+from datetime import datetime
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+
+
+# --- 补充 MinIO 客户端配置 (解决 'client' 报错) ---
+# 如果你之前是在某个函数里定义的 client，现在需要把它放到外面变成全局变量，
+# 这样新的 scan_candidate_folders 函数才能用它。
+# 请确保这段代码在 views.py 的所有函数之前：
+
 
 # 2. ⭐ 修改 Django 的导入，给它起个别名避免冲突
 from django.utils import timezone as django_timezone
@@ -122,8 +136,8 @@ def create_alarm_from_detection(task, img, result_data):
             sub_category = task.detect_category
 
         # 3. 提取 GPS (硬性要求)
-        gps = result_data.get("gps", {})
-        lat = gps.get("lat", 0)
+        gps = result_data.get("gps") or {}
+        lat = gps.get("lat", 0)  # 如果没 GPS，默认经纬度 0
         lon = gps.get("lon", 0)
 
         # 4. 创建告警
@@ -278,7 +292,7 @@ def auto_trigger_detect(task):
     task.started_at = django_timezone.now()
     task.save(update_fields=['detect_status', 'started_at'])
 
-    detect_url = getattr(settings, "FASTAPI_DETECT_URL", "http://localhost:8001/detect")
+    detect_url = getattr(settings, "FASTAPI_DETECT_URL", "http://localhost:8088/detect")
     algo_type = task.detect_category.code if task.detect_category else "unknown"
 
     for img in images:
@@ -286,7 +300,19 @@ def auto_trigger_detect(task):
         img.save(update_fields=['detect_status'])
 
         # 1. 构造极简请求 (符合之前确认的3字段协议)
+        """payload = {
+            "bucket": task.bucket,
+            "object_key": img.object_key,
+            "detect_type": algo_type
+        }"""
         payload = {
+            # 1. 必填字段 (算法要的)
+            "req_id": f"req_{uuid.uuid4().hex[:8]}",  # 随机生成一个ID
+            "image_id": img.id,  # 真实的图片ID
+            "wayline_id": str(task.wayline_id) if task.wayline_id else "0",  # 转字符串
+            "timestamp": int(time.time()),  # 当前时间戳
+
+            # 2. 核心字段 (业务要的)
             "bucket": task.bucket,
             "object_key": img.object_key,
             "detect_type": algo_type
@@ -294,7 +320,7 @@ def auto_trigger_detect(task):
 
         try:
             # 发送请求
-            resp = requests.post(detect_url, json=payload, timeout=30)
+            resp = requests.post(detect_url, json=payload, timeout=300)
 
             if resp.status_code == 200:
                 # ⭐ 改动点1：直接获取 JSON，不要 .get("data")
@@ -305,13 +331,15 @@ def auto_trigger_detect(task):
                 img.detect_status = "done"
                 img.save(update_fields=['detect_status', 'result'])
 
-                # ⭐ 改动点2：通过列表是否为空来判断是否异常
-                # 算法返回: "defects_description": ["RAIL", ...]
-                defects = data.get("defects_description", [])
+                algo_status = data.get("detection_status", 0)
 
-                # 如果列表存在且不为空 (len > 0)，则视为有病害
-                if defects:
+                if algo_status == 1:
+                    # 只有真的是异常 (1)，才创建 Alarm 记录
+                    print(f"⚠️ [Detect] 图片 {img.id} 确认为异常 (Status=1)，生成告警...")
                     create_alarm_from_detection(task, img, data)
+                else:
+                    # 正常 (0)，只打印日志，不往 Alarm 表里写垃圾数据
+                    print(f"✅ [Detect] 图片 {img.id} 检测通过 (Status=0).")
             else:
                 print(f"❌ [Detect] 算法返回错误: {resp.status_code} - {resp.text}")
                 img.detect_status = "failed"
@@ -332,7 +360,7 @@ def auto_trigger_detect(task):
 # 2. 后台轮询 Worker (替代原来的 Webhook)
 # ======================================================================
 
-def minio_poller_worker():
+def minio_poller_worker1():
     """MinIO 轮询线程 (调试 + SQLite兼容版)"""
     time.sleep(3)
     print("🕵️ [Debug] 轮询线程已启动 (Verbose Mode)...")
@@ -435,9 +463,88 @@ def minio_poller_worker():
 
         time.sleep(10)  # 这里的 sleep 决定了轮询频
 
+
+def minio_poller_worker():
+    """
+    [新版] 智能扫描线程 (含自动结束逻辑)
+    """
+    print("🕵️ [Poller] 智能扫描线程已启动，等待指令...")
+    time.sleep(3)
+
+    s3 = get_minio_client()
+
+    while True:
+        try:
+            # 只查询状态为 'scanning' 的任务
+            active_tasks = InspectTask.objects.filter(detect_status='scanning')
+
+            if not active_tasks.exists():
+                time.sleep(2)
+                continue
+
+            for task in active_tasks:
+                # 1. 确定扫描路径
+                if task.prefix_list and len(task.prefix_list) > 0:
+                    prefix = task.prefix_list[0]
+                else:
+                    # 如果没有 prefix_list，回退到 external_task_id
+                    # 注意：如果你的 MinIO 是根目录结构，这里可能是 folder_name + "/"
+                    prefix = f"{task.external_task_id}/"
+
+                bucket_name = getattr(task, 'bucket', 'dji')
+
+                # 2. 扫描 MinIO
+                paginator = s3.get_paginator('list_objects_v2')
+                new_images_count = 0
+
+                # 加上异常捕获，防止某个任务路径不对卡死整个线程
+                try:
+                    for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+                        if "Contents" not in page: continue
+
+                        for obj in page["Contents"]:
+                            key = obj["Key"]
+                            if not key.lower().endswith((".jpg", ".jpeg", ".png", ".bmp")): continue
+                            filename = key.split('/')[-1]
+                            if filename.startswith("detected_"): continue
+
+                            # 检查去重
+                            if not InspectImage.objects.filter(inspect_task=task, object_key=key).exists():
+                                InspectImage.objects.create(
+                                    inspect_task=task,
+                                    wayline=task.wayline,
+                                    object_key=key,
+                                    detect_status="pending"
+                                )
+                                print(f"✨ [New Image] 发现新图片: {filename}")
+                                new_images_count += 1
+                except Exception as s3_err:
+                    print(f"⚠️ 扫描任务 {task.id} 路径异常: {s3_err}")
+
+                # 3. 分支判断
+                if new_images_count > 0:
+                    # A. 有新图 -> 触发检测 -> 检测函数会在跑完后把状态改为 done
+                    print(f"🚀 [Poller] 任务 {task.external_task_id} 发现 {new_images_count} 张新图，触发检测...")
+                    threading.Thread(target=auto_trigger_detect, args=(task,)).start()
+                else:
+                    # B. 无新图 -> 检查是否还有残留的 pending/processing 图片
+                    # 如果所有图片都跑完了，且刚才没扫到新图，说明任务彻底结束了
+                    unfinished_cnt = InspectImage.objects.filter(
+                        inspect_task=task,
+                        detect_status__in=['pending', 'processing']
+                    ).count()
+
+                    if unfinished_cnt == 0:
+                        print(f"✅ [Poller] 任务 {task.external_task_id} 已无新图且处理完毕，自动结束扫描。")
+                        task.detect_status = 'done'
+                        task.save(update_fields=['detect_status'])
+
+            time.sleep(3)
+
+        except Exception as e:
+            print(f"❌ [Poller Error] 轮询出错: {e}")
+            time.sleep(5)
 threading.Thread(target=minio_poller_worker, daemon=True).start()
-
-
 # ======================================================================
 # 3. ViewSets (融合了你的旧逻辑和我的新逻辑)
 # ======================================================================
@@ -750,3 +857,245 @@ class WebhookTestViewSet(viewsets.ViewSet):
         except Exception as e:
             print(f"❌ Webhook 处理异常: {e}")
             return Response({"msg": "解析失败"}, status=400)
+
+
+@csrf_exempt
+def scan_candidate_folders(request):
+    """
+    [API] 预扫描 MinIO 目录 (Boto3 版本)
+    利用 Delimiter='/' 模拟文件夹列表，只看 fh2/projects/ 下的一级目录
+    """
+    if request.method != 'GET':
+        return JsonResponse({"code": 405, "msg": "Method Not Allowed"})
+
+    try:
+        # 1. 获取 Boto3 客户端 (复用你 views.py 第 85 行定义的工具函数)
+        s3 = get_minio_client()
+        bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "dji")
+        #prefix = "fh2/projects/"
+        prefix = ""
+        # 2. 调用 list_objects_v2 (Boto3 的标准写法)
+        # Delimiter='/' 意思是以 / 为界限，这样 API 就会把“子文件夹”聚合在 CommonPrefixes 里
+        response = s3.list_objects_v2(
+            Bucket=bucket_name,
+            Prefix=prefix,
+            Delimiter='/'
+        )
+
+        candidates = {}
+
+        # Boto3 返回的文件夹列表在 'CommonPrefixes' 字段里
+        # 结构如: [{'Prefix': 'fh2/projects/李达轨道 2025-12-12/'}, ...]
+        common_prefixes = response.get('CommonPrefixes', [])
+
+        for item in common_prefixes:
+            full_path = item['Prefix']  # 例如 "fh2/projects/李达轨道 2025-12-12/"
+
+            # 提取文件夹名：去掉前缀 "fh2/projects/" 和末尾的 "/"
+            # split('/') 会得到 ['', 'projects', '李达轨道...', '']
+            folder_name = full_path.strip('/').split('/')[-1]
+
+            # 跳过空名
+            if not folder_name:
+                continue
+
+            # --- 解析日期逻辑 (调用你下方定义的 parse_folder_name) ---
+            date_group, type_name = parse_folder_name(folder_name)
+
+            if date_group not in candidates:
+                candidates[date_group] = []
+
+            # 检查数据库状态
+            exists = InspectTask.objects.filter(external_task_id=folder_name).exists()
+            status = "new"
+            if exists:
+                task = InspectTask.objects.get(external_task_id=folder_name)
+                status = task.detect_status
+
+            candidates[date_group].append({
+                "folder_name": folder_name,
+                "full_path": full_path,
+                "detect_type": type_name,
+                "db_status": status
+            })
+
+        # 排序并返回
+        sorted_keys = sorted(candidates.keys(), reverse=True)
+        result_list = [
+            {"date": k, "tasks": candidates[k]} for k in sorted_keys
+        ]
+
+        return JsonResponse({"code": 200, "data": result_list})
+
+    except Exception as e:
+        print(f"❌ [Scan Error] 扫描失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({"code": 500, "msg": f"MinIO 扫描失败: {str(e)}"})
+import re
+from datetime import datetime
+
+
+def parse_folder_name(folder_name):
+    """
+    解析文件夹名称，提取日期和类型
+    支持格式: "李达轨道 2025-12-12" 或 "20251211_rail_test"
+    返回: (date_str, type_str)
+    """
+    # 移除末尾的斜杠
+    folder_name = folder_name.strip('/')
+
+    # 1. 尝试匹配 YYYY-MM-DD 格式
+    date_match = re.search(r'(\d{4}-\d{2}-\d{2})', folder_name)
+    if date_match:
+        date_str = date_match.group(1)
+        # 类型 = 原名去掉日期和空格
+        type_str = folder_name.replace(date_str, '').strip(' _-')
+        return date_str, type_str or "未知类型"
+
+    # 2. 尝试匹配 YYYYMMDD 格式
+    date_match_compact = re.search(r'(\d{8})', folder_name)
+    if date_match_compact:
+        raw_date = date_match_compact.group(1)
+        # 格式化为 YYYY-MM-DD 以便前端统一展示
+        try:
+            date_obj = datetime.strptime(raw_date, "%Y%m%d")
+            date_str = date_obj.strftime("%Y-%m-%d")
+            type_str = folder_name.replace(raw_date, '').strip(' _-')
+            return date_str, type_str or "未知类型"
+        except ValueError:
+            pass
+
+    # 3. 实在解析不出来，就默认“今天”
+    return datetime.now().strftime("%Y-%m-%d"), folder_name
+
+
+@csrf_exempt
+def start_selected_tasks(request):
+    """
+    [API] 批量启动任务
+    修复：自动将 AlarmCategory 绑定的航线 (wayline) 继承给 InspectTask
+    """
+    if request.method == 'POST':
+        try:
+            body = json.loads(request.body)
+            selected_folders = body.get("folders", [])
+
+            if not selected_folders:
+                return JsonResponse({"code": 400, "msg": "未选择任何任务"})
+
+            started_list = []
+            bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "dji")
+
+            for folder_name in selected_folders:
+                date_str, type_name = parse_folder_name(folder_name)
+
+                # 1. 映射 Code (rail, insulator...)
+                algo_code = "unknown"
+                type_name_lower = type_name.lower()
+                if "轨道" in type_name_lower or "rail" in type_name_lower:
+                    algo_code = "rail"
+                elif "绝缘子" in type_name_lower or "insulator" in type_name_lower:
+                    algo_code = "insulator"
+                elif "桥" in type_name_lower or "bridge" in type_name_lower:
+                    algo_code = "bridge"
+                elif "glm" in type_name_lower:
+                    algo_code = "glm"
+
+                # 2. 获取分类对象
+                category_obj = AlarmCategory.objects.filter(code=algo_code).first()
+                if not category_obj and algo_code != "unknown":
+                    category_obj = AlarmCategory.objects.create(name=f"{algo_code}检测(自动)", code=algo_code)
+
+                # -------------------------------------------------------
+                # 🔥 关键修复：从配置中提取绑定的航线
+                # -------------------------------------------------------
+                # 你的 CSV 里 rail 绑定了 wayline_id=1，这里就会取出来
+                target_wayline = category_obj.wayline if category_obj else None
+
+                # 3. 确保父任务存在
+                parent_task_id = f"{date_str}_检测任务"
+                parent_task, _ = InspectTask.objects.get_or_create(
+                    external_task_id=parent_task_id,
+                    defaults={"detect_status": "done", "bucket": bucket_name, "prefix_list": []}
+                )
+
+                # 4. 创建子任务 (带上航线)
+                prefix_path = f"{folder_name}/"
+                task, created = InspectTask.objects.get_or_create(
+                    external_task_id=folder_name,
+                    defaults={
+                        "parent_task": parent_task,
+                        "wayline": target_wayline,  # 🔥 赋值：把配置里的航线给任务
+                        "bucket": bucket_name,
+                        "detect_category": category_obj,
+                        "prefix_list": [prefix_path],
+                        "detect_status": "scanning"
+                    }
+                )
+
+                # 5. 如果任务已存在，同步更新航线 (Fix现有数据)
+                if not created:
+                    task.parent_task = parent_task
+                    task.detect_category = category_obj
+
+                    # 🔥 如果配置里有航线，强制同步给任务
+                    if target_wayline:
+                        task.wayline = target_wayline
+
+                    if not task.prefix_list:
+                        task.prefix_list = [prefix_path]
+
+                    if task.detect_status != 'scanning':
+                        task.detect_status = 'scanning'
+                    task.save()
+
+                    # 6. 复活失败图片并重测
+                    reset_count = task.images.filter(detect_status='failed').update(detect_status='pending')
+                    if reset_count > 0:
+                        print(f"🔄 [Restart] 任务 {folder_name} 重启，航线ID已修正为: {task.wayline_id}")
+                        threading.Thread(target=auto_trigger_detect, args=(task,)).start()
+
+                started_list.append(folder_name)
+
+            return JsonResponse({"code": 200, "msg": f"成功启动 {len(started_list)} 个任务", "started": started_list})
+
+        except Exception as e:
+            print(f"❌ [Start Task Error]: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return JsonResponse({"code": 500, "msg": str(e)})
+
+    return JsonResponse({"code": 405, "msg": "Method Not Allowed"})
+@csrf_exempt
+def stop_detect(request):
+    """
+    [API] 强制停止/结束检测任务
+    前端点击 [结束检测] 按钮时调用
+    """
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            # 允许传 task_id (数据库ID) 或者 external_id (文件夹名)
+            task_id = data.get('task_id')
+            folder_name = data.get('folder_name')
+
+            tasks = InspectTask.objects.none()
+
+            if task_id:
+                tasks = InspectTask.objects.filter(id=task_id)
+            elif folder_name:
+                tasks = InspectTask.objects.filter(external_task_id=folder_name)
+
+            if not tasks.exists():
+                return JsonResponse({"code": 404, "msg": "未找到指定任务"})
+
+            # 强制更新为 done
+            rows = tasks.update(detect_status="done")
+
+            return JsonResponse({"code": 200, "msg": f"已停止 {rows} 个任务"})
+
+        except Exception as e:
+            return JsonResponse({"code": 500, "msg": str(e)})
+
+    return JsonResponse({"code": 405, "msg": "Method Not Allowed"})

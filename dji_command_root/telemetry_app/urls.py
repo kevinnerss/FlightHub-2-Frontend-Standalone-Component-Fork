@@ -24,6 +24,10 @@ router.register(r'component-config', ComponentConfigViewSet, basename='component
 router.register(r'media-library', MediaLibraryViewSet, basename='media-library')
 router.register(r'test/webhook', views.WebhookTestViewSet, basename='test-webhook')
 router.register(r'inspect-tasks', InspectTaskViewSet, basename='inspect-task')
+
 urlpatterns = [
+    path('scan_candidate_folders', views.scan_candidate_folders),
+    path('start_selected_tasks', views.start_selected_tasks),
+    path('stop_detect', views.stop_detect),
     path('', include(router.urls)),
 ]
