@@ -291,7 +291,7 @@ export default {
         });
         // 加载3D Tiles模型
         try {
-          this.tileset = await Cesium.Cesium3DTileset.fromUrl('/models/site_model/3dtiles/tileset.json')
+          this.tileset = await Cesium.Cesium3DTileset.fromUrl('http://127.0.0.1:8081/tileset.json')
           this.viewer.scene.primitives.add(this.tileset)
           
           // 等待tileset加载完成

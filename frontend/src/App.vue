@@ -37,6 +37,16 @@
             <span class="nav-label">轮播检测</span>
           </router-link>
 
+          <router-link to="/inspect-task-management" class="nav-item" :class="{ active: $route.path === '/inspect-task-management' }">
+            <span class="nav-icon">📋</span>
+            <span class="nav-label">巡检任务</span>
+          </router-link>
+
+          <router-link to="/inspect-relationship" class="nav-item" :class="{ active: $route.path === '/inspect-relationship' }">
+            <span class="nav-icon">🔗</span>
+            <span class="nav-label">检测关系图</span>
+          </router-link>
+
           <router-link to="/media-library" class="nav-item" :class="{ active: $route.path === '/media-library' }">
             <span class="nav-icon">🎞️</span>
             <span class="nav-label">媒体库</span>

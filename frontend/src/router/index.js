@@ -8,7 +8,9 @@ const AlarmManagement = () => import('../views/AlarmManagement.vue')
 const AlarmStats = () => import('../views/AlarmStats.vue')
 const ComponentConfig = () => import('../views/ComponentConfig.vue')
 const CarouselDetection = () => import('../views/CarouselDetection.vue')
-const MediaLibrary = () => import('../views/ceshi.vue')
+const InspectTaskManagement = () => import('../views/InspectTaskManagement.vue')
+const InspectRelationship = () => import('../views/InspectRelationship.vue')
+//const MediaLibrary = () => import('../views/ceshi.vue')
 
 const routes = [
   {
@@ -84,14 +86,34 @@ const routes = [
   },
 
   {
-    path: '/media-library',
-    name: 'MediaLibrary',
-    component: MediaLibrary,
+    path: '/inspect-task-management',
+    name: 'InspectTaskManagement',
+    component: InspectTaskManagement,
     meta: {
-      title: '\u5a92\u4f53\u6587\u4ef6\u5e93',
+      title: '巡检任务管理',
       requiresAuth: true
     }
   },
+  
+  {
+    path: '/inspect-relationship',
+    name: 'InspectRelationship',
+    component: InspectRelationship,
+    meta: {
+      title: '检测关系图',
+      requiresAuth: true
+    }
+  },
+
+  // {
+  //   path: '/media-library',
+  //   name: 'MediaLibrary',
+  //   component: MediaLibrary,
+  //   meta: {
+  //     title: '\u5a92\u4f53\u6587\u4ef6\u5e93',
+  //     requiresAuth: true
+  //   }
+  // },
   
   // 404 page
   {

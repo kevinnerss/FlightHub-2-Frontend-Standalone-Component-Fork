@@ -351,7 +351,21 @@ def auto_trigger_detect(task):
             img.save(update_fields=['detect_status'])
 
     task.finished_at = django_timezone.now()
-    task.detect_status = "done"
+    
+    # 检查是否还有未完成的图片
+    unfinished_count = InspectImage.objects.filter(
+        inspect_task=task,
+        detect_status__in=['pending', 'processing']
+    ).count()
+    
+    if unfinished_count == 0:
+        # 所有图片处理完毕，结束任务
+        task.detect_status = "done"
+        print(f"⏰ [Detect] 任务 {task.id} 所有图片处理完毕，状态改为 done")
+    else:
+        # 还有图片未处理，保持 scanning 状态
+        print(f"⏳ [Detect] 任务 {task.id} 还有 {unfinished_count} 张图片待处理，保持 scanning 状态")
+    
     task.save(update_fields=['detect_status', 'finished_at'])
     print(f"🏁 [Detect] 任务 {task.id} 真实检测结束.")
 
@@ -579,6 +593,22 @@ class InspectTaskViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Processing..."}, status=400)
         threading.Thread(target=auto_trigger_detect, args=(task,)).start()
         return Response({"detail": "Detection started."})
+
+    @action(detail=True, methods=["get"])
+    def images(self, request, pk=None):
+        """返回某个巡检任务下的所有图片及检测状态，按时间顺序排序"""
+        task = self.get_object()
+        queryset = InspectImage.objects.filter(inspect_task=task).order_by("created_at", "id")
+        serializer = InspectImageSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["get"])
+    def sub_tasks(self, request, pk=None):
+        """返回某个父任务下面的所有子任务"""
+        task = self.get_object()
+        queryset = InspectTask.objects.filter(parent_task=task).order_by("created_at", "id")
+        serializer = InspectTaskSerializer(queryset, many=True)
+        return Response(serializer.data)
 
 
 class AlarmViewSet(viewsets.ModelViewSet):
