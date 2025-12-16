@@ -544,7 +544,7 @@ def minio_poller_worker():
         except Exception as e:
             print(f"❌ [Poller Error] 轮询出错: {e}")
             time.sleep(5)
-threading.Thread(target=minio_poller_worker, daemon=True).start()
+#threading.Thread(target=minio_poller_worker, daemon=True).start()
 # ======================================================================
 # 3. ViewSets (融合了你的旧逻辑和我的新逻辑)
 # ======================================================================

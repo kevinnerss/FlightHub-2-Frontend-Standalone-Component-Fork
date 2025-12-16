@@ -124,7 +124,8 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ==== MinIO / 对象存储配置 ====
 #MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "http://192.168.10.10:9000")
-MINIO_ENDPOINT = "http://127.0.0.1:9000"
+# 建议修改逻辑：优先读环境变量，读不到再用 localhost
+MINIO_ENDPOINT = os.environ.get('MINIO_ENDPOINT', 'http://127.0.0.1:9000')
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "admin")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "StrongPassw0rd!")
 MINIO_BUCKET_NAME = os.getenv("MINIO_BUCKET_NAME", "dji")
