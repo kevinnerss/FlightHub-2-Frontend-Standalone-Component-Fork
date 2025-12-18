@@ -259,7 +259,13 @@ export default {
         if (this.waylineIdFilter) params.wayline_id = this.waylineIdFilter
         
         const response = await alarmApi.getAlarms(params)
-        this.alarms = response.results || response
+        const list = response.results || response
+        // 处理图片URL和分类名称
+        this.alarms = list.map(item => ({
+          ...item,
+          image_url: item.image_signed_url || item.image_url,
+          category_name: item.category_details?.name || item.category_name || '未分类'
+        }))
         this.totalAlarms = response.count || this.alarms.length
         this.filteredAlarms = this.alarms
       } catch (error) {

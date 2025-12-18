@@ -184,6 +184,7 @@
                 <th width="160">开始时间</th>
                 <th width="160">完成时间</th>
                 <th width="100">状态</th>
+                <th width="120">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -202,6 +203,16 @@
                   <span class="status-badge" :class="`status-${item.detect_status}`">
                     {{ getStatusText(item.detect_status) }}
                   </span>
+                </td>
+                <td>
+                  <button 
+                    v-if="item.detect_status === 'done'"
+                    @click="playbackSubTask(item)" 
+                    class="action-btn playback-btn"
+                  >
+                    回放
+                  </button>
+                  <span v-else class="text-muted">未完成</span>
                 </td>
               </tr>
             </tbody>
@@ -331,6 +342,17 @@ export default {
         console.error('删除任务失败:', error)
         ElMessage.error('删除任务失败')
       }
+    },
+    
+    playbackSubTask(subTask) {
+      // 跳转到轮播检测页，并传递任务信息
+      this.$router.push({
+        name: 'CarouselDetection',
+        query: {
+          playback: subTask.external_task_id || subTask.id
+        }
+      })
+      ElMessage.success(`开始回放任务: ${subTask.external_task_id || subTask.id}`)
     },
     
     getWaylineName(task) {
@@ -691,6 +713,21 @@ export default {
 .delete-btn:hover:not(:disabled) {
   box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
   transform: translateY(-1px);
+}
+
+.playback-btn {
+  background: linear-gradient(135deg, #14b8a6 0%, #0d9488 100%);
+  color: #fff;
+}
+
+.playback-btn:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(20, 184, 166, 0.4);
+  transform: translateY(-1px);
+}
+
+.text-muted {
+  color: #64748b;
+  font-size: 12px;
 }
 
 /* 分页器 */

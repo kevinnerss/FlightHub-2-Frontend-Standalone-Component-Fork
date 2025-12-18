@@ -342,7 +342,8 @@ export default {
       taskQueue: [], // 待回放的任务列表
       currentTaskIndex: 0, // 当前回放的任务索引
       allTasksCompleted: false, // 所有任务是否已完成
-      scanRefreshTimer: null // 预扫描列表刷新定时器
+      scanRefreshTimer: null, // 预扫描列表刷新定时器
+      isDetectMode: false // 是否为检测模式（true=检测，false=回放）
     }
   },
   computed: {
@@ -396,6 +397,15 @@ export default {
     this.scanRefreshTimer = setInterval(() => {
       this.scanFolders(true) // 传入 true 表示静默刷新
     }, 5000)
+    
+    // 检查是否有回放参数
+    const playbackTaskId = this.$route.query.playback
+    if (playbackTaskId) {
+      console.log('🎬 检测到回放参数:', playbackTaskId)
+      setTimeout(() => {
+        this.startInspectPlaybackForFolder(playbackTaskId, true)
+      }, 500)
+    }
   },
   beforeUnmount() {
     this.stopAuto()
@@ -456,7 +466,7 @@ export default {
       return this.selectedFolders.includes(folderName)
     },
 
-    async startInspectPlaybackForFolder(folderName) {
+    async startInspectPlaybackForFolder(folderName, isPlaybackMode = false) {
       try {
         const params = { page_size: 20, search: folderName }
         const res = await inspectTaskApi.getInspectTasks(params)
@@ -469,25 +479,34 @@ export default {
         console.log('🔍 选中的任务数据:', task)
         this.currentInspectTaskId = task.id
         this.currentInspectTaskName = task.external_task_id || `任务 ${task.id}`
+        // 如果是从外部调用（回放模式），设置标记
+        if (isPlaybackMode) {
+          this.isDetectMode = false
+          this.taskQueue = [folderName]
+          this.currentTaskIndex = 0
+        }
         
-        // 提取父任务名称（从 external_task_id 中提取日期部分，如 "20251211检测"）
-        if (task.external_task_id) {
+        // 提取父任务名称
+        if (task.parent_task_details && task.parent_task_details.external_task_id) {
+          this.currentParentTaskName = task.parent_task_details.external_task_id
+        } else if (task.external_task_id) {
+          // 备用方案：从 external_task_id 提取日期部分
           const match = task.external_task_id.match(/^(\d{8})/)
           this.currentParentTaskName = match ? `${match[1]}检测` : task.external_task_id
         } else {
           this.currentParentTaskName = '未知父任务'
         }
         
-        // 提取子任务名称（任务完整名称或从 external_task_id 获取）
-        this.currentSubTaskName = task.name || task.external_task_id || '未知子任务'
+        // 提取子任务名称（当前任务的external_task_id）
+        this.currentSubTaskName = task.external_task_id || '未知子任务'
         
-        // 提取检测类型（优先从 category_details，然后 detect_type，最后从 external_task_id 推断）
+        // 提取检测类型
         if (task.category_details && task.category_details.name) {
           this.currentDetectionType = task.category_details.name
-        } else if (task.detect_type) {
-          this.currentDetectionType = task.detect_type
+        } else if (task.detect_category_name) {
+          this.currentDetectionType = task.detect_category_name
         } else if (task.external_task_id) {
-          // 从 external_task_id 中推断检测类型（如 "20251211轨道检测" -> "轨道检测"）
+          // 从 external_task_id 中推断检测类型
           const typeMatch = task.external_task_id.match(/\d{8}(.+)/)
           this.currentDetectionType = typeMatch ? typeMatch[1] : '未知类型'
         } else {
@@ -497,7 +516,8 @@ export default {
         console.log('📋 任务信息:', {
           父任务: this.currentParentTaskName,
           子任务: this.currentSubTaskName,
-          检测类型: this.currentDetectionType
+          检测类型: this.currentDetectionType,
+          task数据: task
         })
         
         this.inspectIndex = 0
@@ -522,6 +542,7 @@ export default {
           this.taskQueue = [...this.selectedFolders]
           this.currentTaskIndex = 0
           this.selectedFolders = []
+          this.isDetectMode = true // 标记为检测模式
           await this.refreshAll()
           await this.scanFolders()
           // 自动开始回放第一个任务
@@ -717,9 +738,14 @@ export default {
         console.log(`🔄 当前任务完成，切换到第 ${this.currentTaskIndex + 1} 个任务`)
         await this.startNextTaskPlayback()
       } else {
-        console.log('✅ 所有任务回放完毕')
+        console.log('✅ 所有任务完成')
         this.allTasksCompleted = true
-        ElMessage.success('所有任务回放完毕')
+        // 根据模式显示不同提示
+        if (this.isDetectMode) {
+          ElMessage.success('所有任务检测完成')
+        } else {
+          ElMessage.success('所有任务回放完毕')
+        }
       }
     },
 

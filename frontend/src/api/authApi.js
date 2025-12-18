@@ -1,6 +1,6 @@
 // 直接把默认值也改成相对路径，这样就算环境变量失效，它也会乖乖走 Nginx
 const API_BASE_URL = process.env.VUE_APP_API_BASE_URL || 'http://localhost:8001/api/v1'
-// const API_BASE_URL = process.env.VUE_APP_API_BASE_URL || '/api/v1'
+//const API_BASE_URL = process.env.VUE_APP_API_BASE_URL || '/api/v1'
 
 // 创建axios实例
 const createRequest = async (url, options = {}) => {

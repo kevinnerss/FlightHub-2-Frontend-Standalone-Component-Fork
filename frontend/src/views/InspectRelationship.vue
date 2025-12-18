@@ -30,6 +30,7 @@
           <div
             v-for="(category, index) in categories"
             :key="category.id"
+            :ref="el => { if (el) typeRefs[index] = el }"
             class="type-card"
             :class="{ 'active': hoveredType === category.id }"
             :style="{ animationDelay: `${index * 0.1}s` }"
@@ -56,6 +57,7 @@
           <div
             v-for="(category, index) in categories"
             :key="`wayline-${category.id}`"
+            :ref="el => { if (el) waylineRefs[index] = el }"
             class="wayline-card"
             :class="{ 'active': hoveredType === category.id }"
             :style="{ animationDelay: `${index * 0.1 + 0.2}s` }"
@@ -111,6 +113,137 @@
             </div>
           </div>
         </div>
+        
+        <!-- SVG 连接线画布 -->
+        <svg 
+          class="connection-svg"
+          :style="{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            pointerEvents: 'none'
+          }"
+        >
+          <defs>
+            <!-- 渐变定义 -->
+            <linearGradient 
+              v-for="(category, index) in categories" 
+              :key="`grad-${category.id}`"
+              :id="`gradient-${index}`"
+              x1="0%" y1="0%" x2="100%" y2="0%"
+            >
+              <stop offset="0%" :stop-color="getTypeColor(category.code)" stop-opacity="0.8" />
+              <stop offset="50%" :stop-color="getTypeColor(category.code)" stop-opacity="1" />
+              <stop offset="100%" :stop-color="getTypeColor(category.code)" stop-opacity="0.8" />
+            </linearGradient>
+            
+            <!-- 滤镜定义 -->
+            <filter :id="`glow-${index}`" v-for="(category, index) in categories" :key="`filter-${category.id}`">
+              <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+              <feMerge>
+                <feMergeNode in="coloredBlur"/>
+                <feMergeNode in="SourceGraphic"/>
+              </feMerge>
+            </filter>
+          </defs>
+          
+          <!-- 连接线 -->
+          <g v-for="(category, index) in categories" :key="`connection-${category.id}`">
+            <!-- 背景发光线 -->
+            <path
+              :d="getConnectionPath(index)"
+              :stroke="getTypeColor(category.code)"
+              stroke-width="3"
+              fill="none"
+              opacity="0.2"
+              :filter="`url(#glow-${index})`"
+              class="connection-glow"
+              :class="{ 'active': hoveredType === category.id }"
+            />
+            
+            <!-- 主连接线 -->
+            <path
+              :d="getConnectionPath(index)"
+              :stroke="`url(#gradient-${index})`"
+              stroke-width="2.5"
+              fill="none"
+              stroke-linecap="round"
+              class="connection-line"
+              :class="{ 'active': hoveredType === category.id }"
+              :style="{ animationDelay: `${index * 0.3}s` }"
+            />
+            
+            <!-- 起点高亮圆点 -->
+            <circle
+              :cx="getConnectionPoints(index).startX"
+              :cy="getConnectionPoints(index).startY"
+              r="6"
+              :fill="getTypeColor(category.code)"
+              opacity="0.3"
+              class="connection-point-glow"
+              :class="{ 'active': hoveredType === category.id }"
+            />
+            <circle
+              :cx="getConnectionPoints(index).startX"
+              :cy="getConnectionPoints(index).startY"
+              r="4"
+              :fill="getTypeColor(category.code)"
+              class="connection-point"
+              :class="{ 'active': hoveredType === category.id }"
+            />
+            
+            <!-- 终点高亮圆点 -->
+            <circle
+              :cx="getConnectionPoints(index).endX"
+              :cy="getConnectionPoints(index).endY"
+              r="6"
+              :fill="getTypeColor(category.code)"
+              opacity="0.3"
+              class="connection-point-glow"
+              :class="{ 'active': hoveredType === category.id }"
+            />
+            <circle
+              :cx="getConnectionPoints(index).endX"
+              :cy="getConnectionPoints(index).endY"
+              r="4"
+              :fill="getTypeColor(category.code)"
+              class="connection-point"
+              :class="{ 'active': hoveredType === category.id }"
+            />
+            
+            <!-- 波动粒子 -->
+            <circle
+              :r="4"
+              :fill="getTypeColor(category.code)"
+              class="flow-particle"
+              :class="{ 'active': hoveredType === category.id }"
+            >
+              <animateMotion
+                :path="getConnectionPath(index)"
+                :dur="`${3 + index * 0.5}s`"
+                repeatCount="indefinite"
+              />
+            </circle>
+            
+            <!-- 第二个波动粒子（延迟） -->
+            <circle
+              :r="3"
+              :fill="getTypeColor(category.code)"
+              opacity="0.6"
+              class="flow-particle"
+              :class="{ 'active': hoveredType === category.id }"
+            >
+              <animateMotion
+                :path="getConnectionPath(index)"
+                :dur="`${3 + index * 0.5}s`"
+                :begin="`${1.5 + index * 0.25}s`"
+                repeatCount="indefinite"
+              />
+            </circle>
+          </g>
+        </svg>
       </div>
     </div>
   </div>
@@ -127,16 +260,27 @@ export default {
       categories: [],
       hoveredType: null,
       canvasWidth: 800,
-      canvasHeight: 600
+      canvasHeight: 600,
+      typeRefs: [],
+      waylineRefs: [],
+      connectionPoints: [], // 存储计算好的连接点位置
+      svgWidth: 1200,
+      svgHeight: 800
     }
   },
   async mounted() {
     await this.loadData()
     this.updateCanvasSize()
-    window.addEventListener('resize', this.updateCanvasSize)
+    // 等待DOM渲染完成后计算连接点位置
+    this.$nextTick(() => {
+      setTimeout(() => {
+        this.updateConnectionPositions()
+      }, 200) // 增加延迟到200ms
+    })
+    window.addEventListener('resize', this.handleResize)
   },
   beforeUnmount() {
-    window.removeEventListener('resize', this.updateCanvasSize)
+    window.removeEventListener('resize', this.handleResize)
   },
   methods: {
     async loadData() {
@@ -151,7 +295,7 @@ export default {
           .filter(cat => cat.wayline)
           .slice(0, 4)
           .map(cat => {
-            console.log(`🎯 检测类型: ${cat.name}, code: ${cat.code}`)
+            console.log(`🎯 检测类型: ${cat.name}, code: ${cat.code}, 航线ID: ${cat.wayline}`)
             return {
               ...cat,
               wayline_id: cat.wayline,
@@ -160,7 +304,19 @@ export default {
           })
         
         console.log('🌐 最终显示的类型:', this.categories)
+        console.log('📊 航线信息:', this.categories.map(c => ({ 
+          type: c.name, 
+          waylineId: c.wayline_id, 
+          waylineName: c.wayline_name 
+        })))
         this.loading = false
+        
+        // 数据加载完成后再次计算连接点
+        this.$nextTick(() => {
+          setTimeout(() => {
+            this.updateConnectionPositions()
+          }, 300)
+        })
       } catch (error) {
         console.error('加载检测类型数据失败:', error)
         this.loading = false
@@ -173,6 +329,51 @@ export default {
         this.canvasWidth = container.clientWidth
         this.canvasHeight = Math.min(container.clientHeight, 600)
       }
+      // 更新连接点位置
+      this.$nextTick(() => {
+        this.updateConnectionPositions()
+      })
+    },
+    
+    handleResize() {
+      this.updateCanvasSize()
+    },
+    
+    updateConnectionPositions() {
+      // 动态计算每个连接点的实际位置
+      this.connectionPoints = this.categories.map((category, index) => {
+        const typeEl = this.typeRefs[index]
+        const waylineEl = this.waylineRefs[index]
+        
+        if (!typeEl || !waylineEl) {
+          console.log(`⚠️ 元素未找到: index ${index}`)
+          return { startX: 0, startY: 0, endX: 0, endY: 0 }
+        }
+        
+        const canvas = document.querySelector('.viz-canvas')
+        if (!canvas) {
+          return { startX: 0, startY: 0, endX: 0, endY: 0 }
+        }
+        
+        const typeRect = typeEl.getBoundingClientRect()
+        const waylineRect = waylineEl.getBoundingClientRect()
+        const canvasRect = canvas.getBoundingClientRect()
+        
+        // 计算相对于画布的位置
+        const startX = typeRect.left + typeRect.width / 2 - canvasRect.left
+        const startY = typeRect.bottom - canvasRect.top
+        const endX = waylineRect.left + waylineRect.width / 2 - canvasRect.left
+        const endY = waylineRect.top - canvasRect.top
+        
+        console.log(`🔗 连接点 ${index}:`, {
+          startX: Math.round(startX),
+          startY: Math.round(startY),
+          endX: Math.round(endX),
+          endY: Math.round(endY)
+        })
+        
+        return { startX, startY, endX, endY }
+      })
     },
 
     getTypeIcon(code) {
@@ -339,19 +540,38 @@ export default {
     },
 
     getConnectionPath(index) {
-      // 连接线在中间区域内绘制（画布宽度是中间区域的宽度）
-      const middleWidth = this.canvasWidth - 640  // 中间区域宽度
-      const startX = 0
-      const startY = this.canvasHeight * 0.15 + index * (this.canvasHeight * 0.2)
-      const endX = middleWidth
-      const endY = startY
-
-      const controlX1 = startX + (endX - startX) * 0.3
-      const controlY1 = startY - 20
-      const controlX2 = startX + (endX - startX) * 0.7
-      const controlY2 = endY + 20
-
+      // 计算连接线路径：从上方检测类型卡片到下方航线卡片
+      const points = this.getConnectionPoints(index)
+      const { startX, startY, endX, endY } = points
+      
+      // 创建垂直S形曲线路径（使用贝塞尔曲线）
+      const controlX1 = startX + Math.sin(index * 0.5) * 20 // 轻微波动
+      const controlY1 = startY + (endY - startY) * 0.3
+      const controlX2 = endX + Math.cos(index * 0.5) * 20 // 轻微波动
+      const controlY2 = endY - (endY - startY) * 0.3
+      
       return `M ${startX} ${startY} C ${controlX1} ${controlY1}, ${controlX2} ${controlY2}, ${endX} ${endY}`
+    },
+    
+    getConnectionPoints(index) {
+      // 返回实际计算好的连接点位置
+      if (this.connectionPoints[index]) {
+        return this.connectionPoints[index]
+      }
+      
+      // 默认位置（首次渲染时使用）
+      const cardWidth = 240
+      const cardHeight = 280
+      const gap = 24 // 与CSS一致
+      const totalWidth = 4 * cardWidth + 3 * gap
+      const leftOffset = (this.svgWidth - totalWidth) / 2
+      
+      const startX = leftOffset + cardWidth / 2 + index * (cardWidth + gap)
+      const startY = cardHeight
+      const endX = startX
+      const endY = cardHeight + 60 // 与CSS gap一致
+      
+      return { startX, startY, endX, endY }
     },
 
     getWaylinePreview(index) {
@@ -518,7 +738,7 @@ export default {
   backdrop-filter: blur(10px);
   border-radius: 24px;
   border: 1px solid rgba(59, 130, 246, 0.3);
-  padding: 48px;
+  padding: 32px; /* 从 48px 减小到 32px */
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
   animation: fadeIn 0.8s ease;
   position: relative;
@@ -527,33 +747,46 @@ export default {
 
 .viz-canvas {
   position: relative;
-  min-height: 600px;
+  min-height: 800px; /* 从 900px 减小到 800px */
   display: flex;
   flex-direction: column;
-  gap: 48px;
+  gap: 60px; /* 从 80px 减小到 60px */
   align-items: center;
   justify-content: center;
-  max-width: 1200px; /* 增加最大宽度 */
+  max-width: 1200px; /* 从 1400px 减小到 1200px */
   margin: 0 auto;
-  padding: 0 20px; /* 添加内边距 */
+  padding: 20px; /* 从 40px 减小到 20px */
+}
+
+/* SVG连接线画布 */
+.connection-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
 }
 
 /* 检测类型卡片区域 */
 .detection-types {
   display: grid;
-  grid-template-columns: repeat(4, 240px); /* 与航线卡片保持一致 */
-  gap: 20px; /* 与航线卡片间距一致 */
+  grid-template-columns: repeat(4, 240px);
+  gap: 24px; /* 从 30px 减小到 24px */
   justify-content: center;
+  z-index: 2;
+  position: relative;
 }
 
 /* 航线卡片区域 */
 .waylines {
-  display: flex;
-  flex-direction: row;
-  gap: 20px;
+  display: grid;
+  grid-template-columns: repeat(4, 240px);
+  gap: 24px; /* 从 30px 减小到 24px */
   justify-content: center;
-  flex-wrap: nowrap; /* 禁止换行 */
-  width: 100%;
+  z-index: 2;
+  position: relative;
 }
 
 .type-card {
@@ -674,7 +907,29 @@ export default {
   font-weight: 600;
 }
 
-/* SVG 连接画布 - 只在中间区域 */
+/* SVG 连接线画布 */
+.connection-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+  overflow: visible;
+}
+
+/* 连接线背景发光 */
+.connection-glow {
+  transition: all 0.4s ease;
+}
+
+.connection-glow.active {
+  opacity: 0.5 !important;
+  stroke-width: 6;
+}
+
+/* SVG 连接线 - 只在中间区域 */
 .connection-canvas {
   display: none;
 }
@@ -806,23 +1061,96 @@ export default {
 }
 
 .connection-line {
-  stroke-dasharray: 1000;
-  stroke-dashoffset: 1000;
-  animation: drawLine 2s ease forwards;
-  transition: all 0.3s ease;
+  stroke-dasharray: 10 5;
+  animation: dashFlow 20s linear infinite;
+  transition: all 0.4s ease;
 }
 
 .connection-line.active {
-  filter: drop-shadow(0 0 12px currentColor) !important;
-  animation: pulse 1.5s ease infinite;
+  stroke-width: 3.5;
+  filter: drop-shadow(0 0 8px currentColor);
+  animation: dashFlow 10s linear infinite, pulseLine 1.5s ease infinite;
 }
 
-@keyframes drawLine {
-  to { stroke-dashoffset: 0; }
+@keyframes dashFlow {
+  to { stroke-dashoffset: -1000; }
+}
+
+@keyframes pulseLine {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
 
 .flow-particle {
-  filter: drop-shadow(0 0 8px currentColor);
+  filter: drop-shadow(0 0 6px currentColor);
+  transition: all 0.3s ease;
+}
+
+.flow-particle.active {
+  filter: drop-shadow(0 0 12px currentColor);
+}
+
+/* 连接点高亮效果 */
+.connection-point {
+  transition: all 0.4s ease;
+  animation: pointPulse 2s ease-in-out infinite;
+}
+
+.connection-point.active {
+  animation: pointPulseActive 1s ease-in-out infinite;
+}
+
+.connection-point-glow {
+  animation: glowPulse 2s ease-in-out infinite;
+}
+
+.connection-point-glow.active {
+  animation: glowPulseActive 1s ease-in-out infinite;
+  opacity: 0.6 !important;
+}
+
+@keyframes pointPulse {
+  0%, 100% {
+    r: 4;
+    opacity: 1;
+  }
+  50% {
+    r: 5;
+    opacity: 0.8;
+  }
+}
+
+@keyframes pointPulseActive {
+  0%, 100% {
+    r: 4;
+    opacity: 1;
+  }
+  50% {
+    r: 6;
+    opacity: 0.9;
+  }
+}
+
+@keyframes glowPulse {
+  0%, 100% {
+    r: 6;
+    opacity: 0.3;
+  }
+  50% {
+    r: 8;
+    opacity: 0.5;
+  }
+}
+
+@keyframes glowPulseActive {
+  0%, 100% {
+    r: 6;
+    opacity: 0.6;
+  }
+  50% {
+    r: 10;
+    opacity: 0.8;
+  }
 }
 
 /* 航线卡片样式 */

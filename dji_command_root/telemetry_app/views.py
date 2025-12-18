@@ -940,7 +940,25 @@ def scan_candidate_folders(request):
             status = "new"
             if exists:
                 task = InspectTask.objects.get(external_task_id=folder_name)
-                status = task.detect_status
+                
+                # ⭐ 关键修改：根据图片实际检测进度判断任务状态
+                total_images = task.images.count()
+                if total_images > 0:
+                    done_images = task.images.filter(detect_status='done').count()
+                    processing_images = task.images.filter(detect_status='processing').count()
+                    
+                    # 如果有图片在检测中，显示"检测中"
+                    if processing_images > 0:
+                        status = "processing"
+                    # 如果还有未检测的图片（pending），显示"检测中"
+                    elif done_images < total_images:
+                        status = "processing"
+                    # 所有图片都检测完成，才显示"已完成"
+                    else:
+                        status = task.detect_status
+                else:
+                    # 没有图片，使用任务本身的状态
+                    status = task.detect_status
 
             candidates[date_group].append({
                 "folder_name": folder_name,
