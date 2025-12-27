@@ -133,6 +133,11 @@ def sync_images_core(task):
             for obj in page["Contents"]:
                 key = obj["Key"]
                 if not key.lower().endswith((".jpg", ".jpeg", ".png", ".bmp")): continue
+                
+                # 🔥 新增：跳过算法输出的结果图片（detected_ 开头的文件）
+                filename = key.split('/')[-1]
+                if filename.startswith("detected_"):
+                    continue
 
                 if not InspectImage.objects.filter(inspect_task=task, object_key=key).exists():
                     InspectImage.objects.create(
@@ -322,13 +327,19 @@ def auto_trigger_detect1(task):
     print(f"🏁 [Detect] 任务 {task.id} 结束.")
 
 def auto_trigger_detect(task):
-    """自动检测全流程 (适配真实算法协议版)"""
+    """自动检测全流程 (适配真实算法协议版 + 持续检测新图)"""
+    # 🔥 修改：查询所有pending状态的图片，不管任务是什么时候开始的
     images = task.images.filter(detect_status="pending").order_by("id")
-    if not images.exists(): return
+    if not images.exists():
+        print(f"⏸️  [Detect] 任务 {task.id} 暂无待检测图片")
+        return
 
-    task.detect_status = "processing"
-    task.started_at = django_timezone.now()
-    task.save(update_fields=['detect_status', 'started_at'])
+    # 🔥 修改：只有第一次启动时才更新started_at
+    if not task.started_at:
+        task.started_at = django_timezone.now()
+        task.save(update_fields=['started_at'])
+    
+    # 🔥 关键：不改变任务状态，保持scanning让轮询继续扫描新图
 
     detect_url = getattr(settings, "FASTAPI_DETECT_URL", "http://localhost:8088/detect")
     algo_type = task.detect_category.code if task.detect_category else "unknown"
@@ -388,24 +399,8 @@ def auto_trigger_detect(task):
             img.detect_status = "failed"
             img.save(update_fields=['detect_status'])
 
-    task.finished_at = django_timezone.now()
-    
-    # 检查是否还有未完成的图片
-    unfinished_count = InspectImage.objects.filter(
-        inspect_task=task,
-        detect_status__in=['pending', 'processing']
-    ).count()
-    
-    if unfinished_count == 0:
-        # 所有图片处理完毕，结束任务
-        task.detect_status = "done"
-        print(f"⏰ [Detect] 任务 {task.id} 所有图片处理完毕，状态改为 done")
-    else:
-        # 还有图片未处理，保持 scanning 状态
-        print(f"⏳ [Detect] 任务 {task.id} 还有 {unfinished_count} 张图片待处理，保持 scanning 状态")
-    
-    task.save(update_fields=['detect_status', 'finished_at'])
-    print(f"🏁 [Detect] 任务 {task.id} 真实检测结束.")
+    # 🔥 修改：检测完这一批后，不立即结束任务，交给轮询线程判断
+    print(f"✅ [Detect] 任务 {task.id} 本轮检测完成 ({len(images)}张)，等待轮询线程判断是否结束...")
 
 
 # ======================================================================
@@ -539,14 +534,35 @@ def minio_poller_worker():
             # 常规图片同步逻辑（只同步 scanning 状态的任务）
             active_tasks = InspectTask.objects.filter(detect_status='scanning')
             for task in active_tasks:
+                # 🔥 1. 先同步新图片
                 new_cnt = sync_images_core(task)
                 if new_cnt > 0:
+                    print(f"📥 [Poller] 任务 {task.external_task_id} 同步了 {new_cnt} 张新图")
+                
+                # 🔥 2. 无论是否有新图，都检查是否有待检测的图片
+                pending_cnt = InspectImage.objects.filter(
+                    inspect_task=task,
+                    detect_status='pending'
+                ).count()
+                
+                if pending_cnt > 0:
+                    print(f"🔄 [Poller] 任务 {task.external_task_id} 有 {pending_cnt} 张待检测图片，触发检测...")
                     threading.Thread(target=auto_trigger_detect, args=(task,)).start()
-
-                # 简单结束判断
-                unfinished = InspectImage.objects.filter(inspect_task=task,
-                                                         detect_status__in=['pending', 'processing']).count()
-                # 视情况开启自动结束逻辑...
+                else:
+                    # 🔥 3. 没有pending图片，检查是否还有processing状态的图片
+                    processing_cnt = InspectImage.objects.filter(
+                        inspect_task=task,
+                        detect_status='processing'
+                    ).count()
+                    
+                    if processing_cnt == 0:
+                        # 所有图片都处理完了，且没有新图
+                        print(f"✅ [Poller] 任务 {task.external_task_id} 所有图片处理完毕，标记为完成")
+                        task.detect_status = 'done'
+                        task.finished_at = django_timezone.now()
+                        task.save(update_fields=['detect_status', 'finished_at'])
+                    else:
+                        print(f"⏳ [Poller] 任务 {task.external_task_id} 还有 {processing_cnt} 张图片正在检测中...")
 
         except Exception as e:
             print(f"❌ Poller Loop Error: {e}")
