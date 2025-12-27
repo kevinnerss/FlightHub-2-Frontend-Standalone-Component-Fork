@@ -90,14 +90,14 @@
           </div>
         </div>
 
-        <!-- 实时监控面板（大疆二开组件位） -->
-        <div class="panel-section">
-          <div class="panel-header">
-            <h3 class="panel-title">实时监控</h3>
-          </div>
-          <div class="panel-body monitor-body">
-            <p class="placeholder-text">实时监控将在这里显示（由大疆组件提供）</p>
-          </div>
+        <!-- 实时监控面板（直播流播放器） -->
+        <div class="panel-section live-monitor-section">
+          <LiveStreamPlayer 
+            stream-id="drone01"
+            stream-name="保护区实时监控"
+            :zlm-server="zlmServerUrl"
+            :auto-play="true"
+          />
         </div>
       </div>
     </div>
@@ -155,6 +155,7 @@
 import TaskProgressBar from '../components/TaskProgressBar.vue'
 import AlarmPanel from '../components/AlarmPanel.vue'
 import WaylineFallback from '../components/WaylineFallback.vue'
+import LiveStreamPlayer from '../components/LiveStreamPlayer.vue'
 import alarmApi from '../api/alarmApi.js'
 import componentConfigApi from '../api/componentConfigApi.js'
 
@@ -163,7 +164,8 @@ export default {
   components: {
     TaskProgressBar,
     AlarmPanel,
-    WaylineFallback
+    WaylineFallback,
+    LiveStreamPlayer
   },
   data() {
     return {
@@ -189,7 +191,8 @@ export default {
       showAlarmDetail: false,
       currentAlarm: null,
       fh2CheckTimer: null,
-      componentConfig: null
+      componentConfig: null,
+      zlmServerUrl: 'http://192.168.10.10'
     }
   },
   mounted() {
@@ -291,7 +294,7 @@ export default {
         });
         // 加载3D Tiles模型
         try {
-          this.tileset = await Cesium.Cesium3DTileset.fromUrl('http://127.0.0.1:8081/tileset.json')
+          this.tileset = await Cesium.Cesium3DTileset.fromUrl('/models/site_model/3dtiles/tileset.json')
           this.viewer.scene.primitives.add(this.tileset)
           
           // 等待tileset加载完成
@@ -1050,6 +1053,20 @@ async setupImageryLayers(Cesium) {
 .secondary-btn:hover {
   background: rgba(100, 116, 139, 0.4);
   transform: translateY(-1px);
+}
+
+/* 直播监控区域样式 */
+.live-monitor-section {
+  flex: 1;
+  min-height: 350px;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.live-monitor-section .panel-body {
+  padding: 0;
 }
 
 @media (max-width: 1180px) {

@@ -137,3 +137,15 @@ FASTAPI_DETECT_URL = os.getenv(
     "FASTAPI_DETECT_URL",
     "http://localhost:8088/detect"
 )
+
+
+# settings.py (添加到文件末尾)
+
+# =========================================================
+# DJI 司空 API 配置 (硬编码版)
+# =========================================================
+DJI_API_BASE_URL = "http://192.168.10.2:30812"  # 你的司空平台内网地址
+DJI_X_USER_TOKEN = "eyJhbGciOiJIUzUxMiIsImNyaXQiOlsidHlwIiwiYWxnIiwia2lkIl0sImtpZCI6IjU3YmQyNmEwLTYyMDktNGE5My1hNjg4LWY4NzUyYmU1ZDE5MSIsInR5cCI6IkpXVCJ9.eyJhY2NvdW50IjoiY2FvemhvbmcxMjMiLCJleHAiOjIwNzY4MDc3ODksIm5iZiI6MTc2MTI3NDk4OSwib3JnYW5pemF0aW9uX3V1aWQiOiJiNjU3ODIxZS00MTcyLTQ2YWItODI2ZC1iZDliYzdjYmRmMTkiLCJwcm9qZWN0X3V1aWQiOiIiLCJzdWIiOiJmaDIiLCJ1c2VyX2lkIjoiMTc1MjExOTEyMDE3OTgzMTMxNSJ9.xyzcYqz7svxkcoMiGmgOngsSy-D27jQaqbImCvuAeBB27RFUnN-s4tzVkRJaqeVJYRUP7sKhT9VVZXNFalc5rw" # 你的长Token
+DJI_X_PROJECT_UUID = "136105e0-8a66-472e-a3c4-2ad8304af8b7"  # 你的项目ID
+DJI_X_Request_ID = "12345678"   # 任意唯一标识
+DJI_X_LANGUAGE = "zh"

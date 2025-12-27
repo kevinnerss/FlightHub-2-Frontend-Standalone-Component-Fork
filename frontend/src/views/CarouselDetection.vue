@@ -45,18 +45,18 @@
     
 
     <div class="content-grid">
-      <!-- 左侧：预扫描区域 -->
+      <!-- 左侧：待启动任务列表 -->
       <div class="scan-section">
         <div class="scan-compact-card">
           <div class="scan-compact-header">
-            <h3 class="compact-title">MinIO 预扫描</h3>
+            <h3 class="compact-title">待启动任务</h3>
             <div class="scan-actions-compact">
               <button
                 class="compact-btn primary"
-                @click="scanFolders"
+                @click="loadPendingTasks"
                 :disabled="scanLoading"
               >
-                {{ scanLoading ? '扫描中...' : '扫描' }}
+                {{ scanLoading ? '加载中...' : '刷新' }}
               </button>
               <button
                 class="compact-btn success"
@@ -71,7 +71,7 @@
             <div class="error-state-compact">{{ scanError }}</div>
           </div>
           <div class="scan-compact-body" v-else-if="!candidateGroups.length">
-            <div class="empty-state-compact">点击扫描按钮</div>
+            <div class="empty-state-compact">点击刷新按钮</div>
           </div>
           <div class="scan-compact-body" v-else>
             <div class="scan-list-compact" v-for="group in candidateGroups" :key="group.date">
@@ -79,24 +79,24 @@
               <div
                 class="task-item-compact"
                 v-for="item in group.tasks"
-                :key="item.full_path"
+                :key="item.id"
               >
                 <label class="checkbox-compact">
                   <input
                     type="checkbox"
-                    :value="item.folder_name"
-                    :checked="isFolderSelected(item.folder_name)"
-                    @change="toggleFolderSelection(item.folder_name)"
-                    :disabled="item.db_status === 'scanning'"
+                    :value="item.id"
+                    :checked="isFolderSelected(item.id)"
+                    @change="toggleFolderSelection(item.id)"
+                    :disabled="item.detect_status === 'scanning' || item.detect_status === 'processing'"
                   />
                   <span class="checkmark"></span>
                 </label>
                 <div class="task-info-compact">
-                  <div class="task-name-compact">{{ item.folder_name }}</div>
-                  <div class="task-type-compact">{{ item.detect_type }}</div>
+                  <div class="task-name-compact">{{ item.external_task_id }}</div>
+                  <div class="task-type-compact">{{ item.detect_category_name || '未设置' }}</div>
                 </div>
-                <span class="status-compact" :class="`status-${item.db_status}`">
-                  {{ formatDbStatus(item.db_status) }}
+                <span class="status-compact" :class="`status-${item.detect_status}`">
+                  {{ formatDbStatus(item.detect_status) }}
                 </span>
               </div>
             </div>
@@ -392,10 +392,10 @@ export default {
   mounted() {
     this.loadWaylines()
     this.refreshAll()
-    this.scanFolders() // 初始加载时扫描一次
+    this.loadPendingTasks() // 初始加载待启动任务
     // 启动静默刷新定时器（5秒一次，只更新数据不显示loading）
     this.scanRefreshTimer = setInterval(() => {
-      this.scanFolders(true) // 传入 true 表示静默刷新
+      this.loadPendingTasks(true) // 传入 true 表示静默刷新
     }, 5000)
     
     // 检查是否有回放参数
@@ -416,10 +416,10 @@ export default {
     }
   },
   methods: {
-    async scanFolders(silent = false) {
-      console.log('🔍 [Debug] 开始扫描...', silent ? '(静默)' : '')
+    async loadPendingTasks(silent = false) {
+      console.log('🔍 [Debug] 开始加载待启动任务...', silent ? '(静默)' : '')
       if (this.scanLoading) {
-        console.log('⚠️ [Debug] 扫描中，跳过重复请求')
+        console.log('⚠️ [Debug] 加载中，跳过重复请求')
         return
       }
       
@@ -430,40 +430,57 @@ export default {
       this.scanError = ''
       
       try {
-        console.log('📡 [Debug] 调用 scanCandidateFolders API...')
-        const res = await inspectTaskApi.scanCandidateFolders()
+        console.log('📡 [Debug] 调用 getInspectTasks API 查询 pending 状态的子任务...')
+        const res = await inspectTaskApi.getInspectTasks({
+          detect_status: 'pending',
+          parent_task__isnull: false,  // 只查询子任务
+          page_size: 100,
+          ordering: '-created_at'
+        })
         console.log('✅ [Debug] API 响应:', res)
         
-        if (res && res.code === 200) {
-          this.candidateGroups = res.data || []
-          console.log('📋 [Debug] 更新 candidateGroups:', this.candidateGroups)
-        } else {
-          this.scanError = res?.msg || '预扫描失败'
-          console.error('❌ [Debug] 扫描失败:', this.scanError)
-        }
+        const tasks = this.normalizeList(res)
+        console.log('📋 [Debug] 待启动子任务列表:', tasks)
+        
+        // 按日期分组（从 external_task_id 提取日期，格式如 "20251221工业大学桥梁检测"）
+        const grouped = {}
+        tasks.forEach(task => {
+          const dateMatch = task.external_task_id?.match(/^(\d{8})/)
+          const dateKey = dateMatch ? dateMatch[1] : '未知日期'
+          if (!grouped[dateKey]) {
+            grouped[dateKey] = {
+              date: dateKey,
+              tasks: []
+            }
+          }
+          grouped[dateKey].tasks.push(task)
+        })
+        
+        this.candidateGroups = Object.values(grouped)
+        console.log('📊 [Debug] 分组后的待启动任务:', this.candidateGroups)
       } catch (err) {
-        console.error('❌ [Debug] 扫描异常:', err)
+        console.error('❌ [Debug] 加载待启动任务异常:', err)
         console.error('❌ [Debug] 错误详情:', err.response?.data || err.message)
-        this.scanError = '预扫描失败，请稍后重试'
+        this.scanError = '加载待启动任务失败，请稍后重试'
       } finally {
         if (!silent) {
           this.scanLoading = false
         }
-        console.log('🏁 [Debug] 扫描结束，loading状态:', this.scanLoading)
+        console.log('🏁 [Debug] 加载结束，loading状态:', this.scanLoading)
       }
     },
 
-    toggleFolderSelection(folderName) {
-      const idx = this.selectedFolders.indexOf(folderName)
+    toggleFolderSelection(taskId) {
+      const idx = this.selectedFolders.indexOf(taskId)
       if (idx >= 0) {
         this.selectedFolders.splice(idx, 1)
       } else {
-        this.selectedFolders.push(folderName)
+        this.selectedFolders.push(taskId)
       }
     },
 
-    isFolderSelected(folderName) {
-      return this.selectedFolders.includes(folderName)
+    isFolderSelected(taskId) {
+      return this.selectedFolders.includes(taskId)
     },
 
     async startInspectPlaybackForFolder(folderName, isPlaybackMode = false) {
@@ -533,30 +550,50 @@ export default {
 
     async startSelectedTasks() {
       if (!this.selectedFolders.length || this.startLoading) return
+      
+      console.log('🚀 [Debug] 准备启动选中的任务:', this.selectedFolders)
       this.startLoading = true
+      
       try {
-        const res = await inspectTaskApi.startSelectedTasks(this.selectedFolders)
-        if (res && res.code === 200) {
-          ElMessage.success(res.msg || '已启动检测任务')
-          // 保存任务队列用于顺序回放
-          this.taskQueue = [...this.selectedFolders]
-          this.currentTaskIndex = 0
-          this.selectedFolders = []
-          this.isDetectMode = true // 标记为检测模式
-          await this.refreshAll()
-          await this.scanFolders()
-          // 自动开始回放第一个任务
-          if (this.taskQueue.length > 0) {
-            setTimeout(async () => {
-              await this.startNextTaskPlayback()
-            }, 500)
+        // 批量调用 start 接口启动任务
+        const updatePromises = this.selectedFolders.map(taskId => 
+          inspectTaskApi.startTask(taskId)
+        )
+        
+        await Promise.all(updatePromises)
+        console.log('✅ [Debug] 已将选中任务状态改为 scanning')
+        
+        ElMessage.success(`已启动 ${this.selectedFolders.length} 个检测任务`)
+        
+        // 获取任务名称用于回放
+        const taskNames = []
+        for (const taskId of this.selectedFolders) {
+          const taskData = this.candidateGroups
+            .flatMap(g => g.tasks)
+            .find(t => t.id === taskId)
+          if (taskData) {
+            taskNames.push(taskData.external_task_id)
           }
-        } else {
-          ElMessage.error(res?.msg || '启动检测失败')
+        }
+        
+        // 保存任务队列用于顺序回放
+        this.taskQueue = taskNames
+        this.currentTaskIndex = 0
+        this.selectedFolders = []
+        this.isDetectMode = true // 标记为检测模式
+        
+        await this.refreshAll()
+        await this.loadPendingTasks(true)  // 静默刷新待启动任务列表
+        
+        // 自动开始回放第一个任务
+        if (this.taskQueue.length > 0) {
+          setTimeout(async () => {
+            await this.startNextTaskPlayback()
+          }, 500)
         }
       } catch (err) {
-        console.error('启动检测失败:', err)
-        ElMessage.error('启动检测失败')
+        console.error('❌ [Debug] 启动检测失败:', err)
+        ElMessage.error('启动检测失败: ' + (err.message || '未知错误'))
       } finally {
         this.startLoading = false
       }

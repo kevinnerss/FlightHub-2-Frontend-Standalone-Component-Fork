@@ -11,6 +11,7 @@ from .views import (
     ComponentConfigViewSet,
     MediaLibraryViewSet,
     InspectTaskViewSet,
+    LiveMonitorViewSet,
 )
 from . import views
 router = DefaultRouter()
@@ -24,6 +25,7 @@ router.register(r'component-config', ComponentConfigViewSet, basename='component
 router.register(r'media-library', MediaLibraryViewSet, basename='media-library')
 router.register(r'test/webhook', views.WebhookTestViewSet, basename='test-webhook')
 router.register(r'inspect-tasks', InspectTaskViewSet, basename='inspect-task')
+router.register(r'live-monitor', LiveMonitorViewSet, basename='live-monitor')
 
 urlpatterns = [
     path('scan_candidate_folders', views.scan_candidate_folders),

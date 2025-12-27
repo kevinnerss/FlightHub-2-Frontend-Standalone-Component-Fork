@@ -4,6 +4,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 const Login = () => import('../views/Login.vue')
 const UserManagement = () => import('../views/UserManagement.vue')
 const DjiDashboard = () => import('../views/DjiDashboard.vue')
+const CommandCenter = () => import('../views/CommandCenter.vue')
 const AlarmManagement = () => import('../views/AlarmManagement.vue')
 const AlarmStats = () => import('../views/AlarmStats.vue')
 const ComponentConfig = () => import('../views/ComponentConfig.vue')
@@ -101,6 +102,16 @@ const routes = [
     component: InspectRelationship,
     meta: {
       title: '检测关系图',
+      requiresAuth: true
+    }
+  },
+
+  {
+    path: '/command-center',
+    name: 'CommandCenter',
+    component: CommandCenter,
+    meta: {
+      title: '智能主控台',
       requiresAuth: true
     }
   },

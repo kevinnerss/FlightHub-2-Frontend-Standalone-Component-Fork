@@ -255,3 +255,47 @@ class WaylineImage(models.Model):
     description = models.TextField(blank=True, null=True)
     extra_data = models.JSONField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+# models.py (添加到文件末尾)
+
+class WaylineFingerprint(models.Model):
+    """
+    航线指纹表：存储已匹配航线的关键指纹信息
+    只有匹配上关键字（如“轨道”、“桥梁”）的航线才会生成此记录
+    """
+    # 1. 关联航线 (一对一)
+    wayline = models.OneToOneField(
+        'Wayline',
+        on_delete=models.CASCADE,
+        related_name='fingerprint',
+        verbose_name="关联航线"
+    )
+
+    # 2. 🔥 新增：绑定的检测类型
+    # 存的是匹配成功的那个分类（比如：Name=轨道检测, Code=rail 的那个对象）
+    detect_category = models.ForeignKey(
+        'AlarmCategory',
+        on_delete=models.SET_NULL,  # 如果分类被删了，指纹保留但类型变空
+        null=True,
+        blank=True,
+        related_name='fingerprints',
+        verbose_name="绑定的检测类型"
+    )
+
+    # 3. 指纹数据 (ActionUUID 列表)
+    # 格式: ["270f6508-...", "5bd5b4c2-..."]
+    action_uuids = models.JSONField(default=list, verbose_name="指纹UUID列表")
+
+    # 4. 来源记录 (方便排查问题)
+    source_url = models.CharField(max_length=1000, blank=True, null=True, verbose_name="KMZ下载链接")
+
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="最后更新时间")
+
+    class Meta:
+        verbose_name = "航线指纹库"
+        verbose_name_plural = "航线指纹库"
+
+    def __str__(self):
+        cat_name = self.detect_category.name if self.detect_category else "无类型"
+        return f"[{cat_name}] {self.wayline.name} ({len(self.action_uuids)} IDs)"

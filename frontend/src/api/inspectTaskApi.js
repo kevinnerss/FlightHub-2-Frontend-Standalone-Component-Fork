@@ -177,5 +177,16 @@ export default {
       console.error('获取巡检任务图片失败:', error)
       throw error
     }
+  },
+
+  // 启动巡检任务（将pending改为scanning）
+  async startTask(taskId) {
+    try {
+      const response = await api.post(`/inspect-tasks/${taskId}/start/`)
+      return response
+    } catch (error) {
+      console.error('启动巡检任务失败:', error)
+      throw error
+    }
   }
 }

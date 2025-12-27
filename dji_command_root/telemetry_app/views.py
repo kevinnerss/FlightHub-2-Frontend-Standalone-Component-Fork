@@ -18,7 +18,12 @@ import os
 from datetime import datetime
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-
+import requests
+import zipfile
+import io
+import re
+from django.conf import settings  # 🔥 必须导入 settings
+from .models import WaylineFingerprint, Wayline, AlarmCategory
 
 # --- 补充 MinIO 客户端配置 (解决 'client' 报错) ---
 # 如果你之前是在某个函数里定义的 client，现在需要把它放到外面变成全局变量，
@@ -80,6 +85,39 @@ def get_minio_client():
     )
 
 
+# views.py 添加
+
+def get_image_action_uuid_from_minio(s3_client, bucket, key):
+    """
+    [核心工具] 读取 MinIO 图片头部(前64KB)，提取 XMP 中的 FlightLineInfo (ActionUUID)
+    """
+    try:
+        # 只读取前 64KB (Range Header)，避免下载几MB的大图
+        resp = s3_client.get_object(Bucket=bucket, Key=key, Range='bytes=0-65535')
+        head_data = resp['Body'].read()
+
+        # 尝试解码 (XMP 是 ASCII/UTF-8 文本，混在二进制里)
+        # 使用 latin-1 读取可以避免 decode 报错，且能保留英文字符
+        try:
+            text_data = head_data.decode('latin-1', errors='ignore')
+        except:
+            return None
+
+        # 正则搜索 UUID
+        # 格式通常是 drone-dji:FlightLineInfo="270f6508-..."
+        # 或者 <drone-dji:FlightLineInfo>270f6508-...</drone-dji:FlightLineInfo>
+        match = re.search(r'FlightLineInfo="([0-9a-fA-F-]{36})"', text_data)
+        if not match:
+            match = re.search(r'FlightLineInfo>([0-9a-fA-F-]{36})<', text_data)
+
+        if match:
+            return match.group(1)
+
+    except Exception as e:
+        # 只有在读不到或者不是图片时才会报错，属于正常现象
+        # print(f"⚠️ 读取图片元数据失败: {key} - {e}")
+        pass
+    return None
 def sync_images_core(task):
     """MinIO 同步逻辑"""
     if not task.prefix_list: return 0
@@ -373,112 +411,297 @@ def auto_trigger_detect(task):
 # ======================================================================
 # 2. 后台轮询 Worker (替代原来的 Webhook)
 # ======================================================================
+# views.py
+# views.py 需要引入 timedelta 处理时区
+from datetime import timedelta
 
-def minio_poller_worker1():
-    """MinIO 轮询线程 (调试 + SQLite兼容版)"""
-    time.sleep(3)
-    print("🕵️ [Debug] 轮询线程已启动 (Verbose Mode)...")
+
+def minio_poller_worker():
+    """
+    [最终命名优化版] 智能指纹扫描线程
+    命名规则：
+      - 父任务：yyyyMMdd巡检任务
+      - 子任务：yyyyMMdd航线名检测类型
+    """
+    print("🕵️ [Poller] 智能命名扫描已启动...")
+    time.sleep(5)
+
+    # 启动指纹同步
+    threading.Thread(target=WaylineFingerprintManager.sync_by_keywords).start()
 
     s3 = get_minio_client()
     bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "dji")
 
     while True:
         try:
-            # 1. 检查数据库配置
-            configs = AlarmCategory.objects.filter(
-                wayline__isnull=False, match_keyword__isnull=False
-            ).select_related('wayline')
-
-            if not configs.exists():
-                print("⚠️ [Debug] 数据库无有效配置 (配置数: 0)，等待 60s...")
-                time.sleep(60)
-                continue
-
-            # 2. 扫描 MinIO
-            # print("   [Debug] 正在扫描 MinIO fh2/projects/ ...")
             paginator = s3.get_paginator('list_objects_v2')
-            folder_stats = {}
-            found_any_file = False
 
-            for page in paginator.paginate(Bucket=bucket_name, Prefix="fh2/projects/"):
+            # 存储结构变更为: { "子文件夹前缀": { "key": "采样图", "date": "yyyyMMdd" } }
+            found_sub_folders = {}
+
+            for page in paginator.paginate(Bucket=bucket_name, Prefix="fh_sync/"):
                 if "Contents" not in page: continue
-                found_any_file = True
-                for obj in page['Contents']:
-                    key = obj['Key']
+                for obj in page["Contents"]:
+                    key = obj["Key"]
+                    if not key.lower().endswith((".jpg", ".jpeg")): continue
+
                     parts = key.split('/')
-                    if len(parts) < 3: continue
-                    task_folder = '/'.join(parts[:-1]) + '/'
+                    if "media" in parts:
+                        idx = parts.index("media")
+                        if len(parts) > idx + 2:
+                            folder_prefix = "/".join(parts[:idx + 2]) + "/"
 
-                    last_mod = obj['LastModified']
-                    if task_folder not in folder_stats or last_mod > folder_stats[task_folder]:
-                        folder_stats[task_folder] = last_mod
+                            # 如果这个文件夹还没记录，或者记录了但现在有了更新的日期，就更新它
+                            if folder_prefix not in found_sub_folders:
+                                # 获取文件时间 (UTC) 并转为北京时间 (UTC+8)
+                                last_modified = obj['LastModified']
+                                cn_time = last_modified + timedelta(hours=8)
+                                date_str = cn_time.strftime("%Y%m%d")
 
-            if not found_any_file:
-                print("⚠️ [Debug] MinIO 目录 fh2/projects/ 是空的，未扫描到文件")
+                                found_sub_folders[folder_prefix] = {
+                                    "key": key,
+                                    "date": date_str
+                                }
 
-            # 3. 分析结果
-            now = django_timezone.now()
+            # 处理发现的文件夹
+            for folder_prefix, info in found_sub_folders.items():
+                sample_key = info["key"]
+                date_str = info["date"]
 
-            for folder, last_mod in folder_stats.items():
-                folder_name = folder.strip('/').split('/')[-1]
+                # 原始的文件夹 UUID (2c8a...) 仍然需要用来判断是否处理过，防止重复读取指纹
+                # 但不再用作 TaskID
+                folder_native_uuid = folder_prefix.strip('/').split('/')[-1]
 
-                # A. 时间检查 (调试时可以把 < 300 改成 < 0 来强制执行)
-                time_diff = (now - last_mod).total_seconds()
-                if time_diff < 300:
-                    print(f"   -> ⏳ [Skip] {folder_name} 还在传输中 (距修改 {int(time_diff)}s)")
-                    # continue # 🔴 调试时：如果想强制跑，就把这行注释掉
-
-                # B. 去重检查 (使用 external_task_id 兼容 SQLite)
-                if InspectTask.objects.filter(external_task_id=folder_name).exists():
-                    # print(f"   -> 🔄 [Skip] {folder_name} 任务已存在")
+                # 暂时用 prefix_list 来判断是否处理过该物理路径
+                # (注意：因为我们要改 ID 格式，所以不能简单用 external_task_id 查重了)
+                # 我们可以查询 prefix_list 包含此路径的任务
+                # JSONField 查询：prefix_list__contains=folder_prefix
+                # ✅ 修正代码：使用 icontains 进行字符串匹配
+                # 这会将数据库里的 JSON 视为字符串 "['path/to/a', 'path/to/b']"，然后查找子串
+                if InspectTask.objects.filter(prefix_list__icontains=folder_prefix).exists():
                     continue
 
-                # C. 匹配配置
-                matched_cfg = None
-                folder_lower = folder.lower()
-                for cfg in configs:
-                    if cfg.match_keyword.lower() in folder_lower:
-                        matched_cfg = cfg
-                        break
+                print(f"🔍 [New Folder] 发现新上传: {folder_prefix} ({date_str})，正在识别...")
 
-                if matched_cfg:
-                    print(f"✨ [Success] 匹配成功！正在创建任务: {folder_name}")
+                uuid = get_image_action_uuid_from_minio(s3, bucket_name, sample_key)
+                if not uuid: continue
 
-                    # 1. 解析/创建父任务
-                    parent_name = folder_name.split('_')[0] if '_' in folder_name else folder_name
+                # 查指纹
+                # ✅ SQLite 兼容版 (把 JSON 当字符串查)
+                fingerprint = WaylineFingerprint.objects.filter(action_uuids__icontains=uuid).first()
+                if not fingerprint:
+                    # 兼容遍历
+                    for fp in WaylineFingerprint.objects.all():
+                        if uuid in fp.action_uuids:
+                            fingerprint = fp
+                            break
+
+                if fingerprint:
+                    # 获取名称信息
+                    wayline_name = fingerprint.wayline.name
+                    cat_name = fingerprint.detect_category.name if fingerprint.detect_category else "通用检测"
+
+                    print(f"✅ [Match] 命中: {wayline_name} -> {cat_name}")
+
+                    # =========================================================
+                    # 1. 创建父任务 (虚拟任务)
+                    # 命名格式: "20251221巡检任务"
+                    # =========================================================
+                    parent_task_id = f"{date_str}巡检任务"
+
                     parent_task, _ = InspectTask.objects.get_or_create(
-                        external_task_id=parent_name,
-                        parent_task__isnull=True,
-                        defaults={"detect_status": "done", "bucket": "", "prefix_list": []}
+                        external_task_id=parent_task_id,
+                        defaults={
+                            "detect_status": "done",
+                            "bucket": bucket_name,
+                            "prefix_list": []  # 父任务没有具体路径
+                        }
                     )
 
-                    # 2. 创建子任务
-                    task = InspectTask.objects.create(
+                    # =========================================================
+                    # 2. 创建子任务 (真实任务)
+                    # 命名格式: "20251221工业大学桥梁检测"
+                    # =========================================================
+                    sub_task_id = f"{date_str}{wayline_name}{cat_name}"
+
+                    # 创建任务（不自动检测，等待前端用户选择）
+                    new_task = InspectTask.objects.create(
                         parent_task=parent_task,
-                        wayline=matched_cfg.wayline,
-                        detect_category=matched_cfg,
+                        external_task_id=sub_task_id,  # 🔥 这里变成了中文名称
                         bucket=bucket_name,
-                        prefix_list=[folder],
-                        external_task_id=folder_name,
-                        detect_status="pending"
+                        prefix_list=[folder_prefix],  # 🔥 真实的 MinIO 路径存在这里
+                        wayline=fingerprint.wayline,
+                        detect_category=fingerprint.detect_category,
+                        detect_status="pending"  # 🔥 改为 pending，等待用户手动启动
                     )
+                    print(f"🎉 任务创建: [{parent_task_id}] -> [{sub_task_id}] (等待用户启动)")
 
-                    # 3. 触发
-                    sync_images_core(task)
+            # 常规图片同步逻辑（只同步 scanning 状态的任务）
+            active_tasks = InspectTask.objects.filter(detect_status='scanning')
+            for task in active_tasks:
+                new_cnt = sync_images_core(task)
+                if new_cnt > 0:
                     threading.Thread(target=auto_trigger_detect, args=(task,)).start()
-                else:
-                    print(
-                        f"   -> ❓ [Skip] {folder_name} 未匹配到关键字 (当前关键字: {[c.match_keyword for c in configs]})")
+
+                # 简单结束判断
+                unfinished = InspectImage.objects.filter(inspect_task=task,
+                                                         detect_status__in=['pending', 'processing']).count()
+                # 视情况开启自动结束逻辑...
 
         except Exception as e:
-            print(f"❌ [Monitor] 发生异常: {e}")
+            print(f"❌ Poller Loop Error: {e}")
             import traceback
             traceback.print_exc()
 
-        time.sleep(10)  # 这里的 sleep 决定了轮询频
+        time.sleep(5)
+def minio_poller_worker2():
+    """
+    [最终适配版] 智能指纹扫描线程
+    逻辑：扫描 .../media/{SubFolder}/ 下的图片 -> 识别指纹 -> 创建父子任务
+    结构：Job(父) -> SubFolder(子, 绑定类型)
+    """
+    print("🕵️ [Poller] 深度指纹扫描已启动...")
+    time.sleep(5)
 
+    # 1. 启动时同步一次指纹库 (确保本地指纹是最新的)
+    threading.Thread(target=WaylineFingerprintManager.sync_by_keywords).start()
 
-def minio_poller_worker():
+    s3 = get_minio_client()
+    bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "dji")
+
+    while True:
+        try:
+            # =========================================================
+            # 第一步：发现 MinIO 里的所有“子任务文件夹” (2c..., 44...)
+            # =========================================================
+            # 我们直接列出 fh_sync 下的所有对象
+            # 目标是找到包含 "/media/" 且在 media 下面还有一层文件夹的路径
+
+            paginator = s3.get_paginator('list_objects_v2')
+
+            # 临时存储发现的子文件夹: { "子文件夹完整路径/": "其中一张采样图的Key" }
+            # 例如: { ".../media/2c8a.../": ".../media/2c8a.../DJI_001.jpg" }
+            found_sub_folders = {}
+
+            for page in paginator.paginate(Bucket=bucket_name, Prefix="dji/fh_sync/"):
+                if "Contents" not in page: continue
+                for obj in page["Contents"]:
+                    key = obj["Key"]
+                    if not key.lower().endswith((".jpg", ".jpeg")): continue
+
+                    # 路径解析：dji/fh_sync/ProjID/JobID/media/SubFolder/img.jpg
+                    parts = key.split('/')
+
+                    if "media" in parts:
+                        idx = parts.index("media")
+                        # 确保 media 下面还有一层 (parts[idx+1]) 且不是文件名本身
+                        if len(parts) > idx + 2:
+                            # 构造该子文件夹的唯一标识路径 (Prefix)
+                            # join 到 sub_folder_name 为止
+                            folder_prefix = "/".join(parts[:idx + 2]) + "/"
+
+                            if folder_prefix not in found_sub_folders:
+                                found_sub_folders[folder_prefix] = key
+
+            # =========================================================
+            # 第二步：处理每一个发现的子文件夹
+            # =========================================================
+            for folder_prefix, sample_key in found_sub_folders.items():
+
+                # 从路径中提取最后一段作为 external_task_id (即 2c8a... 或 44ed...)
+                folder_uuid = folder_prefix.strip('/').split('/')[-1]
+
+                # 1. 检查数据库：如果这个【子任务】已经建过了，跳过
+                if InspectTask.objects.filter(external_task_id=folder_uuid).exists():
+                    continue
+
+                print(f"🔍 [New Sub-Task] 发现新文件夹: {folder_uuid}，正在采样识别...")
+
+                # 2. 提取指纹 (读取采样图的 XMP)
+                uuid = get_image_action_uuid_from_minio(s3, bucket_name, sample_key)
+
+                if not uuid:
+                    # 读不到指纹，可能是还没传完或不是航线图，暂跳过
+                    continue
+
+                # 3. 查库匹配
+                # 查找包含此 UUID 的指纹记录
+                fingerprint = WaylineFingerprint.objects.filter(action_uuids__contains=uuid).first()
+
+                # 兼容性处理：如果 filter contains 不生效，尝试遍历
+                if not fingerprint:
+                    for fp in WaylineFingerprint.objects.all():
+                        if uuid in fp.action_uuids:
+                            fingerprint = fp
+                            break
+
+                if fingerprint:
+                    # 获取分类名称 (如：轨道检测)
+                    cat_name = fingerprint.detect_category.name if fingerprint.detect_category else "无类型"
+                    print(f"✅ [Match] 命中航线: {fingerprint.wayline.name} -> 类型: {cat_name}")
+
+                    # 4. 自动创建父任务 (Job层)
+                    # sample_key: .../JobID/media/SubFolder/img.jpg
+                    parts = sample_key.split('/')
+                    media_idx = parts.index("media")
+                    job_id = parts[media_idx - 1]  # media 的上一级就是 JobID (即父任务ID)
+
+                    # 创建或获取父任务
+                    # 父任务ID 就是你说的 "20251219巡检" (现在是 1361... UUID)
+                    parent_task, _ = InspectTask.objects.get_or_create(
+                        external_task_id=job_id,
+                        defaults={
+                            "detect_status": "done",  # 父任务本身不跑检测，只是个壳
+                            "bucket": bucket_name
+                        }
+                    )
+
+                    # 5. 创建子任务 (SubFolder层) - 这才是真正的检测任务
+                    # 子任务ID 就是你说的 "20251219轨道" (现在是 44ed... UUID)
+                    new_task = InspectTask.objects.create(
+                        parent_task=parent_task,  # 👈 绑定父任务
+                        external_task_id=folder_uuid,  # 用 2c8a... 做ID
+                        bucket=bucket_name,
+                        prefix_list=[folder_prefix],  # 扫描范围限定在这个子文件夹
+                        wayline=fingerprint.wayline,
+                        detect_category=fingerprint.detect_category,  # 🔥 自动绑定类型(轨道/桥梁)
+                        detect_status="scanning"
+                    )
+                    print(f"🎉 任务创建成功: 子任务[{folder_uuid}] -> 父任务[{job_id}] (类型: {cat_name})")
+
+                else:
+                    # 指纹库里没找到，说明这条航线可能没在后台配置，或者没同步 KMZ
+                    # print(f"⚪ 指纹 {uuid} 未匹配，跳过")
+                    pass
+
+            # =========================================================
+            # 第三步：常规图片同步 (逻辑不变)
+            # =========================================================
+            active_tasks = InspectTask.objects.filter(detect_status='scanning')
+            for task in active_tasks:
+                new_cnt = sync_images_core(task)
+                if new_cnt > 0:
+                    print(f"📥 任务 {task.external_task_id} 同步了 {new_cnt} 张新图，触发检测...")
+                    threading.Thread(target=auto_trigger_detect, args=(task,)).start()
+
+                # 结束判断逻辑
+                unfinished_cnt = InspectImage.objects.filter(
+                    inspect_task=task,
+                    detect_status__in=['pending', 'processing']
+                ).count()
+
+                # 如果没新图且没待处理图，可以视为完成 (根据需求开启)
+                # if unfinished_cnt == 0 and new_cnt == 0:
+                #      task.detect_status = 'done'
+                #      task.save()
+
+        except Exception as e:
+            print(f"❌ Poller Loop Error: {e}")
+            import traceback
+            traceback.print_exc()
+
+        time.sleep(5)
+def minio_poller_worker1():
     """
     [新版] 智能扫描线程 (含自动结束逻辑)
     """
@@ -610,6 +833,17 @@ class InspectTaskViewSet(viewsets.ModelViewSet):
         serializer = InspectTaskSerializer(queryset, many=True)
         return Response(serializer.data)
 
+    @action(detail=True, methods=["post"])
+    def start(self, request, pk=None):
+        """启动巡检任务:将状态从pending改为scanning"""
+        task = self.get_object()
+        if task.detect_status not in ["pending"]:
+            return Response({"detail": f"当前状态[{task.detect_status}]不可启动,仅pending状态可启动"}, status=400)
+        task.detect_status = "scanning"
+        task.started_at = django_timezone.now()
+        task.save(update_fields=["detect_status", "started_at"])
+        return Response(InspectTaskSerializer(task).data)
+
 
 class AlarmViewSet(viewsets.ModelViewSet):
     """保留你原本的 Search Fields"""
@@ -624,6 +858,8 @@ class AlarmViewSet(viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'updated_at', 'status']
 
 
+# views.py
+
 class WaylineViewSet(viewsets.ModelViewSet):
     queryset = Wayline.objects.all()
     serializer_class = WaylineSerializer
@@ -631,6 +867,97 @@ class WaylineViewSet(viewsets.ModelViewSet):
     search_fields = ['wayline_id', 'name', 'description', 'created_by']
     ordering_fields = ['created_at', 'updated_at', 'status', 'name']
     ordering = ['-created_at']
+
+    # =========================================================
+    # 🆕 新增接口: 同步航线数据 (POST /waylines/sync_data/)
+    # =========================================================
+    @action(detail=False, methods=['post'])
+    def sync_data(self, request):
+        """
+        [硬编码配置版] 主动调用司空 API 同步航线列表到本地数据库
+        """
+        print("🔄 [Wayline Sync] 开始同步航线列表 (使用 Settings 配置)...")
+
+        try:
+            # 1. 从 settings 读取硬编码参数
+            base_url = getattr(settings, "DJI_API_BASE_URL", "http://192.168.10.2").rstrip('/')
+
+            headers = {
+                "X-User-Token": getattr(settings, "DJI_X_USER_TOKEN", ""),
+                "X-Project-Uuid": getattr(settings, "DJI_X_PROJECT_UUID", ""),
+                "X-Request-Id": getattr(settings, "DJI_X_Request_ID", "uuid-123"),
+                "X-Language": getattr(settings, "DJI_X_LANGUAGE", "zh"),
+                "Content-Type": "application/json"
+            }
+
+            # 简单的参数校验
+            if not headers["X-User-Token"] or not headers["X-Project-Uuid"]:
+                return Response({"code": 500, "msg": "Settings 中缺少 DJI_X_USER_TOKEN 或 DJI_X_PROJECT_UUID"},
+                                status=500)
+
+            # 2. 发起请求
+            # API 路径: /openapi/v0.1/wayline
+            api_url = f"{base_url}/openapi/v0.1/wayline"
+
+            # 假设你的接口支持分页，我们可以先传大一点的 page_size
+            params = {
+                "page": 1,
+                "page_size": 100
+            }
+
+            print(f"   -> 请求接口: {api_url}")
+            resp = requests.get(api_url, headers=headers, params=params, timeout=10)
+
+            if resp.status_code != 200:
+                print(f"❌ 同步失败: {resp.status_code} - {resp.text}")
+                return Response({"code": 502, "msg": f"司空接口报错: {resp.status_code}"}, status=502)
+
+            # 3. 解析数据
+            resp_json = resp.json()
+
+            # 根据你提供的 JSON 结构，数据可能在 data.list 里，或者 data 本身就是 list
+            # 结构通常是: { "code": 0, "data": { "list": [...] } }
+            raw_data = resp_json.get("data", {})
+            wayline_list = []
+
+            if isinstance(raw_data, dict):
+                wayline_list = raw_data.get("list", [])
+            elif isinstance(raw_data, list):
+                wayline_list = raw_data
+
+            print(f"   -> 获取到 {len(wayline_list)} 条航线数据")
+
+            # 4. 入库更新
+            updated_count = 0
+            for item in wayline_list:
+                w_id = item.get("id")
+                w_name = item.get("name")
+
+                # 你的 JSON 里有 "update_time": 1766109565421
+                # 这是一个毫秒级时间戳，如果需要存，可以转一下，或者直接存到 description 里备注
+                raw_update_time = item.get("update_time")
+
+                if not w_id: continue
+
+                # 执行 Update 或 Create
+                Wayline.objects.update_or_create(
+                    wayline_id=w_id,
+                    defaults={
+                        "name": w_name,
+                        "description": f"Synced from API. UpdateTime: {raw_update_time}",
+                        "status": "ACTIVE"
+                    }
+                )
+                updated_count += 1
+
+            print(f"✅ [Wayline Sync] 同步完成，已更新 {updated_count} 条记录")
+            return Response({"code": 200, "msg": "同步成功", "count": updated_count})
+
+        except Exception as e:
+            print(f"❌ 同步异常: {e}")
+            import traceback
+            traceback.print_exc()
+            return Response({"code": 500, "msg": str(e)}, status=500)
 
 
 class WaylineImageViewSet(viewsets.ModelViewSet):
@@ -815,9 +1142,291 @@ class MediaLibraryViewSet(viewsets.ViewSet):
         return response
 
 
-# views.py
+# ======================================================================
+# 直播监听管理（保护区检测）
+# ======================================================================
 
-# ... (保留之前的 import 和 helper 函数) ...
+# 全局变量：存储正在运行的监听线程
+live_monitor_threads = {}
+# 格式: { "stream_id": { "thread": Thread对象, "stop_event": Event对象, "task": InspectTask对象 } }
+
+
+class LiveMonitorViewSet(viewsets.ViewSet):
+    """
+    直播监听控制接口（保护区检测）
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    @action(detail=False, methods=['post'], url_path='start')
+    def start_monitor(self, request):
+        """
+        启动直播监听
+        POST /api/v1/live-monitor/start/
+        Body: { "stream_id": "drone01", "interval": 3.0 }
+        """
+        stream_id = request.data.get('stream_id', 'drone01')
+        interval = float(request.data.get('interval', 3.0))
+
+        # 检查是否已经在运行
+        if stream_id in live_monitor_threads:
+            return Response(
+                {"status": "error", "message": f"流 {stream_id} 的监听已在运行中"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # 创建停止事件
+            stop_event = threading.Event()
+
+            # 启动监听线程
+            monitor_thread = threading.Thread(
+                target=self._run_monitor,
+                args=(stream_id, interval, stop_event),
+                daemon=True
+            )
+            monitor_thread.start()
+
+            # 等待一下确保任务创建完成
+            time.sleep(0.5)
+
+            # 查找刚创建的任务
+            current_task = InspectTask.objects.filter(
+                external_task_id__contains=f"直播_{stream_id}"
+            ).order_by('-created_at').first()
+
+            # 记录线程信息
+            live_monitor_threads[stream_id] = {
+                "thread": monitor_thread,
+                "stop_event": stop_event,
+                "task": current_task,
+                "started_at": django_timezone.now().isoformat()
+            }
+
+            return Response({
+                "status": "success",
+                "message": f"直播监听已启动: {stream_id}",
+                "stream_id": stream_id,
+                "interval": interval,
+                "task_id": current_task.id if current_task else None
+            })
+
+        except Exception as e:
+            print(f"❌ 启动监听失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return Response(
+                {"status": "error", "message": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['post'], url_path='stop')
+    def stop_monitor(self, request):
+        """
+        停止直播监听
+        POST /api/v1/live-monitor/stop/
+        Body: { "stream_id": "drone01" }
+        """
+        stream_id = request.data.get('stream_id', 'drone01')
+
+        if stream_id not in live_monitor_threads:
+            return Response(
+                {"status": "error", "message": f"流 {stream_id} 没有运行中的监听"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # 发送停止信号
+            monitor_info = live_monitor_threads[stream_id]
+            monitor_info["stop_event"].set()
+
+            # 等待线程结束（最多3秒）
+            monitor_info["thread"].join(timeout=3)
+
+            # 更新任务状态为完成
+            if monitor_info["task"]:
+                task = monitor_info["task"]
+                task.detect_status = "done"
+                task.finished_at = django_timezone.now()
+                task.save(update_fields=['detect_status', 'finished_at'])
+
+            # 移除记录
+            del live_monitor_threads[stream_id]
+
+            return Response({
+                "status": "success",
+                "message": f"直播监听已停止: {stream_id}"
+            })
+
+        except Exception as e:
+            print(f"❌ 停止监听失败: {e}")
+            return Response(
+                {"status": "error", "message": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['get'], url_path='status')
+    def get_status(self, request):
+        """
+        获取所有监听状态
+        GET /api/v1/live-monitor/status/
+        """
+        stream_id = request.query_params.get('stream_id')
+
+        if stream_id:
+            # 查询单个流状态
+            if stream_id in live_monitor_threads:
+                info = live_monitor_threads[stream_id]
+                return Response({
+                    "stream_id": stream_id,
+                    "is_running": True,
+                    "started_at": info["started_at"],
+                    "task_id": info["task"].id if info["task"] else None
+                })
+            else:
+                return Response({
+                    "stream_id": stream_id,
+                    "is_running": False
+                })
+        else:
+            # 查询所有流状态
+            status_list = []
+            for sid, info in live_monitor_threads.items():
+                status_list.append({
+                    "stream_id": sid,
+                    "is_running": True,
+                    "started_at": info["started_at"],
+                    "task_id": info["task"].id if info["task"] else None
+                })
+            return Response({
+                "monitors": status_list,
+                "count": len(status_list)
+            })
+
+    def _run_monitor(self, stream_id, interval, stop_event):
+        """
+        监听主逻辑（在独立线程中运行）
+        """
+        # 配置区
+        ZLM_API_HOST = "http://zlm:80"
+        ZLM_SECRET = "035c73f7-bb6b-4889-a715-d9eb2d1925cc"
+        bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "dji")
+
+        print(f"🚀 [监听启动] Stream: {stream_id} | 等待首帧截图...")
+
+        s3 = get_minio_client()
+        frame_count = 0
+        current_task = None  # ⭐ 延迟创建任务
+        
+        # 用于标记是否已成功截取第一帧
+        first_frame_captured = False
+
+        # 循环抽帧（直到收到停止信号）
+        while not stop_event.is_set():
+            try:
+                snap_api = f"{ZLM_API_HOST}/index/api/getSnap"
+                params = {
+                    "secret": ZLM_SECRET,
+                    "url": f"rtmp://127.0.0.1:1935/live/{stream_id}",
+                    "timeout_sec": 5,
+                    "expire_sec": 1
+                }
+
+                resp = requests.get(snap_api, params=params, timeout=5)
+                res_json = resp.json()
+
+                if res_json.get('code') == 0:
+                    # ⭐ 第一次成功截图时，才创建任务
+                    if not first_frame_captured:
+                        print(f"✅ [首帧成功] 开始创建任务...")
+                        
+                        # 创建任务结构
+                        today_str = datetime.now().strftime('%Y%m%d')
+                        parent_task_name = f"{today_str}保护区直播汇总"
+
+                        parent_task, _ = InspectTask.objects.get_or_create(
+                            external_task_id=parent_task_name,
+                            defaults={
+                                "bucket": bucket_name,
+                                "detect_status": "done",
+                                "prefix_list": []
+                            }
+                        )
+
+                        category, _ = AlarmCategory.objects.get_or_create(
+                            code="protection_zone",
+                            defaults={"name": "保护区实时检测", "match_keyword": "保护区"}
+                        )
+
+                        now_time = datetime.now().strftime('%H%M%S')
+                        child_task_name = f"直播_{stream_id}_{now_time}"
+                        virtual_prefix = f"fh_sync/live/{parent_task_name}/{child_task_name}/"
+
+                        current_task = InspectTask.objects.create(
+                            parent_task=parent_task,
+                            external_task_id=child_task_name,
+                            bucket=bucket_name,
+                            prefix_list=[virtual_prefix],
+                            detect_category=category,
+                            detect_status="processing"
+                        )
+                        
+                        # 更新全局线程记录（补充任务信息）
+                        if stream_id in live_monitor_threads:
+                            live_monitor_threads[stream_id]["task"] = current_task
+                        
+                        print(f"📂 [任务创建] {parent_task_name} -> {child_task_name}")
+                        first_frame_captured = True
+                    
+                    # 下载截图
+                    img_download_url = ZLM_API_HOST + res_json['data']
+                    img_resp = requests.get(img_download_url, timeout=5)
+
+                    if img_resp.status_code == 200:
+                        file_bytes = io.BytesIO(img_resp.content)
+                        file_size = file_bytes.getbuffer().nbytes
+                        fname = f"frame_{datetime.now().strftime('%H%M%S_%f')}.jpg"
+                        object_key = f"{current_task.prefix_list[0]}{fname}"
+
+                        s3.put_object(
+                            Bucket=bucket_name,
+                            Key=object_key,
+                            Body=file_bytes,
+                            Length=file_size,
+                            ContentType='image/jpeg'
+                        )
+
+                        InspectImage.objects.create(
+                            inspect_task=current_task,
+                            object_key=object_key,
+                            detect_status='pending',
+                            wayline=current_task.wayline
+                        )
+                        frame_count += 1
+                        print(f"📸 [截图] {fname} (总计: {frame_count})")
+
+                        # 异步触发检测
+                        threading.Thread(target=auto_trigger_detect, args=(current_task,)).start()
+                else:
+                    # 流还没推上来，等待
+                    if not first_frame_captured:
+                        print(f"⏳ [等待推流] {stream_id}...")
+
+            except Exception as e:
+                if not stop_event.is_set():
+                    print(f"❌ 截图异常: {e}")
+
+            # 等待间隔（可被停止信号中断）
+            stop_event.wait(interval)
+
+        print(f"🛑 [监听停止] Stream: {stream_id} | 共截取 {frame_count} 帧")
+        
+        # 停止时更新任务状态
+        if current_task:
+            current_task.detect_status = "done"
+            current_task.finished_at = django_timezone.now()
+            current_task.save(update_fields=['detect_status', 'finished_at'])
+            print(f"✅ [任务完成] {current_task.external_task_id}")
+
 
 # ======================================================================
 # 恢复 Webhook 相关全局变量
@@ -1147,3 +1756,160 @@ def stop_detect(request):
             return JsonResponse({"code": 500, "msg": str(e)})
 
     return JsonResponse({"code": 405, "msg": "Method Not Allowed"})
+
+
+class WaylineFingerprintManager:
+
+    @staticmethod
+    def get_api_headers_and_host():
+        """从 Settings 获取配置"""
+        base_url = getattr(settings, "DJI_API_BASE_URL", "http://192.168.10.2").rstrip('/')
+        headers = {
+            "X-User-Token": getattr(settings, "DJI_X_USER_TOKEN", ""),
+            "X-Project-Uuid": getattr(settings, "DJI_X_PROJECT_UUID", ""),
+            "X-Request-Id": getattr(settings, "DJI_X_Request_ID", "uuid-123"),
+            "X-Language": getattr(settings, "DJI_X_LANGUAGE", "zh"),
+            "Content-Type": "application/json"
+        }
+        if not headers["X-User-Token"] or not headers["X-Project-Uuid"]:
+            raise Exception("Settings 中缺少 DJI_X_USER_TOKEN 或 DJI_X_PROJECT_UUID 配置")
+        return headers, base_url
+
+    @staticmethod
+    def sync_by_keywords():
+        """
+        🚀 [按需同步核心逻辑]
+        1. 获取 API 所有航线列表。
+        2. 遍历本地 AlarmCategory 获取匹配规则 (例如: 轨道, 桥梁)。
+        3. 只有名字匹配上的航线，才下载 KMZ 并存入指纹表。
+        """
+        print("🔄 [Fingerprint] 开始按关键字匹配并同步...")
+
+        try:
+            # 1. 准备配置和规则
+            headers, base_url = WaylineFingerprintManager.get_api_headers_and_host()
+
+            # 获取所有配置了关键字的分类
+            # 例如: [{"code": "rail", "match_keyword": "轨道"}, {"code": "bridge", "match_keyword": "桥梁"}]
+            categories = AlarmCategory.objects.exclude(match_keyword__isnull=True).exclude(match_keyword__exact='')
+
+            if not categories.exists():
+                print("⚠️ [Stop] 本地 AlarmCategory 表未配置 match_keyword，无法进行匹配。")
+                return
+
+            print(f"   -> 加载匹配规则: {[c.name + ':' + c.match_keyword for c in categories]}")
+
+            # 2. 调用 API 获取航线列表 (仅获取名字和ID)
+            # API: GET /openapi/v0.1/wayline
+            list_url = f"{base_url}/openapi/v0.1/wayline"
+
+            # 分页获取所有航线 (这里简化写，假设一页够用，不够可加循环)
+            res = requests.get(list_url, headers=headers, params={"page": 1, "page_size": 200}, timeout=10)
+            if res.status_code != 200:
+                print(f"❌ 获取航线列表失败: {res.status_code}")
+                return
+
+            res_json = res.json()
+            raw_data = res_json.get('data', [])
+            wayline_list = raw_data.get('list', []) if isinstance(raw_data, dict) else raw_data
+
+            print(f"   -> API 返回 {len(wayline_list)} 条航线，开始筛选...")
+
+            matched_count = 0
+
+            # 3. 循环匹配
+            for item in wayline_list:
+                w_id = item.get('id')
+                w_name = item.get('name')
+
+                if not w_id or not w_name: continue
+
+                # 🔥 核心匹配逻辑
+                matched_category = None
+                for cat in categories:
+                    if cat.match_keyword in w_name:
+                        matched_category = cat
+                        break  # 匹配到一个就停止，避免重复
+
+                # 只有匹配成功的才处理
+                if matched_category:
+                    print(f"   ✅ [Match] 航线 '{w_name}' 命中规则: {matched_category.name}")
+
+                    # 4. 获取详情拿到 download_url
+                    WaylineFingerprintManager.process_single_wayline(
+                        base_url, headers, w_id, w_name, matched_category
+                    )
+                    matched_count += 1
+                else:
+                    # print(f"   ⚪ [Skip] 航线 '{w_name}' 未匹配任何关键字")
+                    pass
+
+            print(f"🏁 同步完成: API共 {len(wayline_list)} 条，匹配并入库 {matched_count} 条。")
+
+        except Exception as e:
+            print(f"❌ 同步流程异常: {e}")
+            import traceback
+            traceback.print_exc()
+
+    @staticmethod
+    def process_single_wayline(base_url, headers, wayline_id, wayline_name, category_obj):
+        """
+        处理单个命中的航线：入库 Wayline -> 获取 URL -> 下载 KMZ -> 入库 Fingerprint
+        """
+        try:
+            # A. 确保存储了 Wayline 基本信息
+            local_wayline, _ = Wayline.objects.update_or_create(
+                wayline_id=wayline_id,
+                defaults={
+                    "name": wayline_name,
+                    "detect_type": category_obj.code  # 顺便更新下冗余字段
+                }
+            )
+
+            # B. 调用详情接口获取 download_url
+            detail_url = f"{base_url}/openapi/v0.1/wayline/{wayline_id}"
+            res = requests.get(detail_url, headers=headers, timeout=10)
+
+            download_url = None
+            if res.status_code == 200:
+                data = res.json().get('data', {})
+                download_url = data.get('download_url')
+
+            if not download_url:
+                print(f"      ⚠️ 未获取到 download_url，跳过下载")
+                return
+
+            # C. 下载并解析 KMZ
+            print(f"      📥 下载 KMZ 解析指纹...")
+            r = requests.get(download_url, timeout=30)
+            if r.status_code != 200:
+                return
+
+            uuid_set = set()
+            with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+                kml_files = [n for n in z.namelist() if n.endswith('template.kml')]
+                if kml_files:
+                    with z.open(kml_files[0]) as f:
+                        content = f.read().decode('utf-8')
+                        found = re.findall(r'<wpml:actionUUID>(.*?)</wpml:actionUUID>', content)
+                        uuid_set.update(found)
+
+            # D. 存入指纹表 (包含 detect_category)
+            if uuid_set:
+                fp, _ = WaylineFingerprint.objects.get_or_create(wayline=local_wayline)
+                fp.detect_category = category_obj  # 🔥 关键：把匹配到的类型存进去
+                fp.action_uuids = list(uuid_set)
+                fp.source_url = download_url
+                fp.save()
+                print(f"      💾 指纹入库成功 (包含 {len(uuid_set)} 个 UUID)")
+
+        except Exception as e:
+            print(f"      ❌ 处理单条航线出错: {e}")
+    @staticmethod
+    def identify(image_uuid):
+        """根据图片UUID反查航线"""
+        all_fps = WaylineFingerprint.objects.all()
+        for fp in all_fps:
+            if image_uuid in fp.action_uuids:
+                return fp.wayline
+        return None
