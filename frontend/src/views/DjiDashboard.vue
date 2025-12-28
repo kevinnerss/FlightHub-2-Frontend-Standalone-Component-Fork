@@ -233,7 +233,6 @@ export default {
         this.checkFh2Availability()
       }, 1000)
     },
-    
     async initCesium() {
       if (this.viewer) return
 
@@ -244,20 +243,26 @@ export default {
         this.cesiumLib = Cesium
         const tokenFromConfig = this.componentConfig?.cesium_ion_token || this.componentConfig?.cesiumIonToken
         Cesium.Ion.defaultAccessToken =
-          tokenFromConfig || process.env.VUE_APP_CESIUM_ION_TOKEN || Cesium.Ion.defaultAccessToken || ''
-        
+            tokenFromConfig || process.env.VUE_APP_CESIUM_ION_TOKEN || Cesium.Ion.defaultAccessToken || ''
+
         const container = this.$refs.cesiumContainer
         if (!container) {
           throw new Error('找不到 Cesium 容器')
         }
-        
+
         const rect = container.getBoundingClientRect()
         if (rect.width === 0 || rect.height === 0) {
           throw new Error(`容器尺寸异常: ${rect.width}x${rect.height}`)
         }
-        
+
         // 直接在ref容器上创建Cesium Viewer
         this.viewer = new Cesium.Viewer(container, {
+          // --- 核心修改开始 ---
+          sceneMode: Cesium.SceneMode.COLUMBUS_VIEW, // 1. 切换到哥伦布视图（平面模式）
+          mapMode2D: Cesium.MapMode2D.ROTATE,        // 2. 允许在平面模式下旋转
+          scene3DOnly: false,                        // 3. 【关键】必须设为 false 或删除，否则无法使用平面模式
+          // --- 核心修改结束 ---
+
           animation: false,
           baseLayerPicker: false,
           fullscreenButton: false,
@@ -269,10 +274,9 @@ export default {
           selectionIndicator: false,
           timeline: false,
           navigationHelpButton: false,
-          scene3DOnly: true,
           creditContainer: document.createElement('div')
         })
-        
+
         this.viewer.scene.globe.show = this.globeVisible
         await this.setupImageryLayers(Cesium)
         this.tuneCameraControls(this.viewer.scene.screenSpaceCameraController)
@@ -280,33 +284,33 @@ export default {
 
         // 强制resize确保canvas正确渲染
         this.viewer.resize()
-        const centerLon = 116.39; 
+        const centerLon = 116.39;
         const centerLat = 39.90;
-        
+
         this.viewer.camera.setView({
-            // 高度设为 3000-5000 米，确保在你的 14-18 级范围内
-            destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, 4000), 
-            orientation: {
-                heading: 0,
-                pitch: Cesium.Math.toRadians(-90), // 垂直向下看
-                roll: 0
-            }
+          // 高度设为 3000-5000 米，确保在你的 14-18 级范围内
+          destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, 4000),
+          orientation: {
+            heading: 0,
+            pitch: Cesium.Math.toRadians(-90), // 垂直向下看
+            roll: 0
+          }
         });
         // 加载3D Tiles模型
         try {
           this.tileset = await Cesium.Cesium3DTileset.fromUrl('/models/site_model/3dtiles/tileset.json')
           this.viewer.scene.primitives.add(this.tileset)
-          
+
           // 等待tileset加载完成
           await this.tileset.readyPromise
-          
+
           // 自动缩放到模型并调整视角
           await this.viewer.zoomTo(this.tileset, new Cesium.HeadingPitchRange(
-            0, // heading (朝向)
-            Cesium.Math.toRadians(-30), // pitch (俯仰角，负数向下)
-            this.tileset.boundingSphere.radius * 2.5 // range (距离)
+              0, // heading (朝向)
+              Cesium.Math.toRadians(-30), // pitch (俯仰角，负数向下)
+              this.tileset.boundingSphere.radius * 2.5 // range (距离)
           ))
-          
+
           // 再次resize确保显示正确
           this.viewer.resize()
         } catch (tilesetError) {
@@ -328,7 +332,6 @@ export default {
         this.loading = false
       }
     },
-    
     handleWaylineSelected(wayline) {
       this.selectedWayline = wayline
       this.fetchAlarmsByWayline(wayline.id)
@@ -342,36 +345,44 @@ export default {
         console.warn('获取组件配置失败，将使用默认配置', err)
       }
     },
+    async setupImageryLayers(Cesium) {
+      if (!this.viewer) return
+      const layers = this.viewer.imageryLayers
+      layers.removeAll()
 
-async setupImageryLayers(Cesium) {
-  if (!this.viewer) return
-  const layers = this.viewer.imageryLayers
-  layers.removeAll()
+      // 【修改这里】
+      // 1. 端口改成 Django 的默认端口 8000
+      // 2. 注意 Django 的 URL 结尾通常习惯带斜杠 /，要和 urls.py 里保持一致
+      // 3. 如果你的 urls.py 有前缀（比如 api/），记得加上，例如 'http://127.0.0.1:8000/api/tiles/{z}/{x}/{y}/'
+      const localTilesUrl = 'http://192.168.10.10:5000/tiles/{z}/{x}/{y}'
+      // const localTilesUrl = 'http://127.0.0.1:5000/tiles/{z}/{x}/{y}'
 
-  const offlineUrl = this.componentConfig?.offline_tiles_url
-    || process.env.VUE_APP_OFFLINE_TILES_URL
-    // || '/offline-tiles/{z}/{x}/{y}.png' // 默认指向 public 下的目录
 
-  try {
-    layers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
-      url: offlineUrl,
-      tilingScheme: new Cesium.WebMercatorTilingScheme(),
-      minimumLevel: 14,
-      maximumLevel: 18,
-      credit: ''
-    }))
-  } catch (e) {
-    console.warn('本地瓦片加载失败，改用在线底图', e)
-    try {
-      const provider = await Cesium.IonImageryProvider.fromAssetId(2)
-      layers.addImageryProvider(provider)
-    } catch (err) {
-      layers.addImageryProvider(new Cesium.OpenStreetMapImageryProvider({
-        url: 'https://a.tile.openstreetmap.org/'
-      }))
-    }
-  }
-},
+      // 沈阳范围 (西, 南, 东, 北)
+      const extent = Cesium.Rectangle.fromDegrees(122.0, 41.0, 124.0, 43.0)
+
+      try {
+        const layer = new Cesium.UrlTemplateImageryProvider({
+          url: localTilesUrl,
+          tilingScheme: new Cesium.WebMercatorTilingScheme(),
+          rectangle: extent,
+          minimumLevel: 0,
+          maximumLevel: 19
+          // 不需要 customTags，因为 Django 后端已经做了翻转处理
+        })
+
+        layers.addImageryProvider(layer)
+
+        setTimeout(() => {
+          this.viewer.camera.flyTo({
+            destination: extent
+          })
+        }, 1000)
+
+      } catch (e) {
+        console.warn('地图加载失败', e)
+      }
+    },
 
     tuneCameraControls(controller) {
       if (!controller) return
