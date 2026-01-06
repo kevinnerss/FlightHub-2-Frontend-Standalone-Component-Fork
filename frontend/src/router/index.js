@@ -9,8 +9,8 @@ const AlarmManagement = () => import('../views/AlarmManagement.vue')
 const AlarmStats = () => import('../views/AlarmStats.vue')
 const ComponentConfig = () => import('../views/ComponentConfig.vue')
 const CarouselDetection = () => import('../views/CarouselDetection.vue')
+const CreateFlightTask = () => import('../views/CreateFlightTask.vue')
 const InspectTaskManagement = () => import('../views/InspectTaskManagement.vue')
-const InspectRelationship = () => import('../views/InspectRelationship.vue')
 //const MediaLibrary = () => import('../views/ceshi.vue')
 
 const routes = [
@@ -87,6 +87,16 @@ const routes = [
   },
 
   {
+    path: '/create-flight-task',
+    name: 'CreateFlightTask',
+    component: CreateFlightTask,
+    meta: {
+      title: '创建飞行任务',
+      requiresAuth: true
+    }
+  },
+
+  {
     path: '/inspect-task-management',
     name: 'InspectTaskManagement',
     component: InspectTaskManagement,
@@ -96,16 +106,6 @@ const routes = [
     }
   },
   
-  {
-    path: '/inspect-relationship',
-    name: 'InspectRelationship',
-    component: InspectRelationship,
-    meta: {
-      title: '检测关系图',
-      requiresAuth: true
-    }
-  },
-
   {
     path: '/command-center',
     name: 'CommandCenter',

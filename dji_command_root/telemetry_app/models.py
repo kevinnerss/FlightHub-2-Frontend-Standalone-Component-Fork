@@ -21,10 +21,10 @@ class Wayline(models.Model):
 
     # 这个字段可以保留作为参考，但实际自动逻辑将由 AlarmCategory 控制
     DETECT_TYPE_CHOICES = [
-        ("rail", "轨道"),
-        ("insulator", "绝缘子"),
+        ("rail", "铁路"),
+        ("contactline", "接触网"),
         ("bridge", "桥梁"),
-        ("catenary", "接触网"),
+        ("protected_area", "保护区"),
     ]
     detect_type = models.CharField(
         max_length=20,
@@ -117,6 +117,9 @@ class Alarm(models.Model):
 
     latitude = models.DecimalField(max_digits=9, decimal_places=6, verbose_name="纬度")
     longitude = models.DecimalField(max_digits=9, decimal_places=6, verbose_name="经度")
+    # 高度信息（从算法返回的 GPS 信息中提取）
+    high = models.FloatField(null=True, blank=True, verbose_name="高度（米）")
+
     content = models.TextField(verbose_name="告警通用描述")
     image_url = models.URLField(max_length=500, blank=True, null=True, verbose_name="告警图片链接")
     specific_data = models.JSONField(blank=True, null=True, verbose_name="特定详情(算法结果)")
@@ -179,7 +182,17 @@ class InspectTask(models.Model):
     started_at = models.DateTimeField(null=True, blank=True, verbose_name="任务开始时间")
     finished_at = models.DateTimeField(null=True, blank=True, verbose_name="任务结束时间")
     expire_at = models.DateTimeField(null=True, blank=True, verbose_name="过期时间")
+    # 🔥 [新增] 司空任务关联字段
+    dji_task_uuid = models.CharField(max_length=100, unique=True, null=True, blank=True, verbose_name="司空任务UUID")
+    dji_task_name = models.CharField(max_length=200, null=True, blank=True, verbose_name="司空任务名称")
+    dji_status = models.CharField(max_length=50, default="unknown", verbose_name="司空状态")
+    
+    # 🔥 [新增] 设备与航线关联 (用于多机多任务区分)
+    device_sn = models.CharField(max_length=100, null=True, blank=True, verbose_name="执行设备SN")
+    # wayline_id 已经作为外键存在 (wayline 字段)，无需重复定义
 
+    # 🔥 [新增] 用于“防抖动”判断
+    last_image_uploaded_at = models.DateTimeField(null=True, blank=True, verbose_name="最后一张图接收时间")
     DETECT_STATUS_CHOICES = [("pending", "待检测"), ("processing", "检测中"), ("done", "已完成"), ("failed", "失败")]
     detect_status = models.CharField(max_length=20, choices=DETECT_STATUS_CHOICES, default="pending",
                                      verbose_name="检测状态")
@@ -287,7 +300,11 @@ class WaylineFingerprint(models.Model):
     # 格式: ["270f6508-...", "5bd5b4c2-..."]
     action_uuids = models.JSONField(default=list, verbose_name="指纹UUID列表")
 
-    # 4. 来源记录 (方便排查问题)
+    # 4. 🔥 新增：详细动作信息 (包含经纬度、高度、Yaw)
+    # 格式: [{"uuid": "...", "lat": 12.3, "lon": 11.1, "height": 100, "gimbal_yaw": 90}, ...]
+    action_details = models.JSONField(default=list, blank=True, null=True, verbose_name="动作详情")
+
+    # 5. 来源记录 (方便排查问题)
     source_url = models.CharField(max_length=1000, blank=True, null=True, verbose_name="KMZ下载链接")
 
     updated_at = models.DateTimeField(auto_now=True, verbose_name="最后更新时间")
@@ -299,3 +316,78 @@ class WaylineFingerprint(models.Model):
     def __str__(self):
         cat_name = self.detect_category.name if self.detect_category else "无类型"
         return f"[{cat_name}] {self.wayline.name} ({len(self.action_uuids)} IDs)"
+
+
+class DronePosition(models.Model):
+    """
+    无人机位置信息表：存储无人机实时位置数据
+    用于分析无人机飞行轨迹和状态
+    """
+    # 设备标识
+    device_sn = models.CharField(max_length=100, verbose_name="设备序列号", db_index=True)
+    device_model = models.CharField(max_length=100, blank=True, null=True, verbose_name="设备型号")
+    
+    # 位置信息（核心数据）
+    latitude = models.DecimalField(max_digits=11, decimal_places=8, verbose_name="纬度")
+    longitude = models.DecimalField(max_digits=11, decimal_places=8, verbose_name="经度")
+    altitude = models.FloatField(verbose_name="海拔高度(米)")
+    relative_height = models.FloatField(null=True, blank=True, verbose_name="相对起飞点高度(米)")
+    
+    # 飞行状态
+    heading = models.FloatField(null=True, blank=True, verbose_name="航向角(度)")
+    speed_horizontal = models.FloatField(null=True, blank=True, verbose_name="水平速度(m/s)")
+    speed_vertical = models.FloatField(null=True, blank=True, verbose_name="垂直速度(m/s)")
+    
+    # 电池和信号
+    battery_percent = models.IntegerField(null=True, blank=True, verbose_name="电池电量(%)")
+    signal_quality = models.IntegerField(null=True, blank=True, verbose_name="信号质量")
+    
+    # 原始数据（保存完整JSON便于后续分析）
+    raw_data = models.JSONField(blank=True, null=True, verbose_name="原始MQTT数据")
+    
+    # MQTT 元信息
+    mqtt_topic = models.CharField(max_length=500, blank=True, null=True, verbose_name="MQTT主题")
+    
+    # 时间戳
+    timestamp = models.DateTimeField(verbose_name="数据时间戳", db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="记录创建时间")
+    
+    class Meta:
+        verbose_name = "无人机位置记录"
+        verbose_name_plural = "无人机位置记录"
+        ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['device_sn', '-timestamp']),
+            models.Index(fields=['-timestamp']),
+        ]
+    
+    def __str__(self):
+        return f"{self.device_sn} - {self.timestamp} - ({self.latitude}, {self.longitude}, {self.altitude}m)"
+
+
+class FlightTaskInfo(models.Model):
+    """
+    飞行任务记录表：记录通过 /openapi/v0.1/flight-task 接口创建的任务
+    task_uuid 对应 media 下的一级文件夹名
+    """
+    task_uuid = models.CharField(max_length=100, unique=True, verbose_name="任务UUID")
+    name = models.CharField(max_length=200, verbose_name="任务名称")
+    sn = models.CharField(max_length=100, blank=True, null=True, verbose_name="设备SN")
+    wayline_id = models.CharField(max_length=100, blank=True, null=True, verbose_name="航线ID")
+    
+    # 存储创建任务时的完整参数，方便回溯
+    params = models.JSONField(blank=True, null=True, verbose_name="任务参数")
+    
+    # 状态字段，可以记录任务的执行状态
+    status = models.CharField(max_length=50, default="created", verbose_name="任务状态")
+    
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "飞行任务记录"
+        verbose_name_plural = "飞行任务记录"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.name} ({self.task_uuid})"

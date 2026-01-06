@@ -31,6 +31,15 @@
           {{ wayline.name }}
         </option>
       </select>
+
+      <!-- 🔥 新增：检测类型筛选 -->
+      <select v-model="categoryFilter" @change="loadTasks" class="filter-select">
+        <option value="">全部类型</option>
+        <option value="rail">🛤️ 铁路检测</option>
+        <option value="contactline">⚡ 接触网检测</option>
+        <option value="bridge">🌉 桥梁检测</option>
+        <option value="protected_area">🛡️ 保护区检测</option>
+      </select>
     </div>
     
     <!-- 任务表格 -->
@@ -45,6 +54,10 @@
           <tr>
             <th width="80">ID</th>
             <th width="250">外部任务ID</th>
+            <th width="140">执行设备</th> <!-- 🔥 新增列 -->
+            <!-- 🔥 选了检测类型时显示航线和检测类型列 -->
+            <th v-if="categoryFilter" width="180">航线名称</th>
+            <th v-if="categoryFilter" width="120">检测类型</th>
             <th width="200">创建时间</th>
             <th width="120">状态</th>
             <th width="100">已清理</th>
@@ -53,13 +66,25 @@
         </thead>
         <tbody>
           <tr v-if="filteredTasks.length === 0">
-            <td colspan="6" class="empty-row">暂无任务数据</td>
+            <td :colspan="categoryFilter ? 9 : 7" class="empty-row">暂无任务数据</td>
           </tr>
           <tr v-for="task in filteredTasks" :key="task.id" class="task-row">
             <td>
               <span class="id-badge">{{ task.id }}</span>
             </td>
             <td>{{ task.external_task_id || '--' }}</td>
+            <td>
+              <span class="device-badge" :class="{'has-sn': task.device_sn}">
+                {{ task.device_sn || '--' }}
+              </span>
+            </td>
+            <!-- 🔥 选了检测类型时显示子任务的航线和检测类型 -->
+            <td v-if="categoryFilter">{{ task.wayline_details?.name || '--' }}</td>
+            <td v-if="categoryFilter">
+              <span class="category-badge">
+                {{ task.detect_category_name || getCategoryName(task.detect_category) || '未设置' }}
+              </span>
+            </td>
             <td>
               <span class="datetime-text">{{ formatDate(task.created_at) }}</span>
             </td>
@@ -75,10 +100,19 @@
             </td>
             <td>
               <div class="action-buttons">
-                <button @click="viewTaskDetail(task)" class="action-btn view-btn">
+                <!-- 🔥 如果是子任务，显示回放按钮 -->
+                <button 
+                  v-if="categoryFilter && task.detect_status === 'done'"
+                  @click="playbackSubTask(task)" 
+                  class="action-btn playback-btn"
+                >
+                  回放
+                </button>
+                <button v-else @click="viewTaskDetail(task)" class="action-btn view-btn">
                   查看
                 </button>
-                <button @click="viewSubTasks(task)" class="action-btn subtask-btn">
+                <!-- 父任务才显示查看子任务按钮 -->
+                <button v-if="!categoryFilter" @click="viewSubTasks(task)" class="action-btn subtask-btn">
                   查看子任务
                 </button>
                 <button @click="deleteTask(task.id)" class="action-btn delete-btn">
@@ -179,6 +213,7 @@
               <tr>
                 <th width="80">ID</th>
                 <th width="180">外部任务ID / 文件夹</th>
+                <th width="120">执行设备</th> <!-- 🔥 新增 -->
                 <th width="140">航线名称</th>
                 <th width="120">检测类型</th>
                 <th width="160">开始时间</th>
@@ -191,6 +226,7 @@
               <tr v-for="item in subTasks" :key="item.id" class="task-row">
                 <td><span class="id-badge">{{ item.id }}</span></td>
                 <td>{{ item.external_task_id || '--' }}</td>
+                <td><span class="device-badge">{{ item.device_sn || '--' }}</span></td> <!-- 🔥 新增 -->
                 <td>{{ item.wayline_details?.name || '--' }}</td>
                 <td>
                   <span class="category-badge">
@@ -237,11 +273,13 @@ export default {
     return {
       tasks: [],
       waylines: [],
+      categories: [], // 检测类型列表
       filteredTasks: [],
       loading: false,
       searchQuery: '',
       statusFilter: '',
       waylineFilter: '',
+      categoryFilter: '', // 🔥 新增：检测类型筛选
       currentPage: 1,
       pageSize: 10,
       totalTasks: 0,
@@ -273,6 +311,31 @@ export default {
           page_size: this.pageSize
         }
         
+        // 🔥 检测类型筛选逻辑：如果选了类型，只显示子任务
+        if (this.categoryFilter) {
+          // 先获取检测类型的 ID
+          const alarmApi = await import('../api/alarmApi')
+          const categoryRes = await alarmApi.default.getAlarmCategories({ page_size: 100 })
+          const categories = Array.isArray(categoryRes) ? categoryRes : (categoryRes?.results || [])
+          const normalizeCode = (code) => {
+            const v = (code || '').toString().toLowerCase().trim()
+            if (v === 'rail' || v === 'track') return 'rail'
+            if (v === 'contactline' || v === 'catenary' || v === 'overhead' || v === 'insulator' || v === 'pole') return 'contactline'
+            if (v === 'bridge') return 'bridge'
+            if (v === 'protected_area' || v === 'protection_zone' || v === 'protection_area') return 'protected_area'
+            return v
+          }
+          const targetCategory = categories.find(c => normalizeCode(c.code) === this.categoryFilter)
+          
+          if (targetCategory) {
+            params.detect_category = targetCategory.id
+            params.parent_task__isnull = false // 🔥 只查询子任务
+          }
+        } else {
+          // 没选类型，只显示父任务
+          params.parent_task__isnull = true
+        }
+        
         if (this.statusFilter) {
           params.detect_status = this.statusFilter
         }
@@ -287,8 +350,16 @@ export default {
         
         const response = await inspectTaskApi.getInspectTasks(params)
         const allTasks = response?.results || []
-        // 只展示父任务（没有 parent_task 的记录）
-        this.tasks = allTasks.filter(item => !item.parent_task)
+        
+        // 🔥 根据是否选了检测类型决定显示父任务还是子任务
+        if (this.categoryFilter) {
+          // 选了类型，显示子任务
+          this.tasks = allTasks
+        } else {
+          // 没选类型，显示父任务
+          this.tasks = allTasks.filter(item => !item.parent_task)
+        }
+        
         this.totalTasks = response?.count || this.tasks.length
         this.filteredTasks = this.tasks
       } catch (error) {
@@ -357,6 +428,24 @@ export default {
     
     getWaylineName(task) {
       return task?.wayline_details?.name || '--'
+    },
+    
+    // 🔥 新增：获取检测类型名称
+    getCategoryName(categoryValue) {
+      if (!categoryValue) return ''
+      if (typeof categoryValue !== 'string') return ''
+      const categoryMap = {
+        'rail': '铁路检测',
+        'contactline': '接触网检测',
+        'bridge': '桥梁检测',
+        'protected_area': '保护区检测',
+        'catenary': '接触网检测',
+        'overhead': '接触网检测',
+        'insulator': '接触网检测',
+        'pole': '接触网检测',
+        'protection_zone': '保护区检测'
+      }
+      return categoryMap[categoryValue] || ''
     },
     
     getStatusText(status) {
@@ -725,9 +814,36 @@ export default {
   transform: translateY(-1px);
 }
 
+.subtask-btn {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: #fff;
+}
+
+.subtask-btn:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+  transform: translateY(-1px);
+}
+
 .text-muted {
   color: #64748b;
   font-size: 12px;
+}
+
+.device-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #94a3b8; /* Default muted color for '--' */
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.device-badge.has-sn {
+  color: #c084fc;
+  border-color: rgba(192, 132, 252, 0.3);
+  background: rgba(192, 132, 252, 0.1);
 }
 
 /* 分页器 */

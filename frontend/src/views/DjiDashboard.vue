@@ -16,6 +16,34 @@
       </div>
     </div>
 
+    <div class="detect-type-summary">
+      <div class="detect-type-header">
+        <div class="detect-type-title">检测类型</div>
+        <div class="detect-type-subtitle">rail / contactline / bridge / protected_area</div>
+      </div>
+      <div class="detect-type-table-wrap">
+        <table class="detect-type-table">
+          <thead>
+            <tr>
+              <th>类型</th>
+              <th>英文</th>
+              <th>关键字</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="t in detectTypes" :key="t.code">
+              <td class="type-cell">
+                <span class="type-icon">{{ t.icon }}</span>
+                <span class="type-name">{{ t.name }}</span>
+              </td>
+              <td class="code-cell">{{ t.code }}</td>
+              <td class="keywords-cell">{{ t.keywords }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- 主内容区 -->
     <div class="dashboard-content">
       <!-- 左侧面板 - 航线管理 -->
@@ -169,6 +197,12 @@ export default {
   },
   data() {
     return {
+      detectTypes: [
+        { name: '铁路', code: 'rail', icon: '🛤️', keywords: 'rail, 铁路, 轨道' },
+        { name: '接触网', code: 'contactline', icon: '⚡', keywords: 'contactline, 接触网, catenary, overhead' },
+        { name: '桥梁', code: 'bridge', icon: '🌉', keywords: 'bridge, 桥梁' },
+        { name: '保护区', code: 'protected_area', icon: '🛡️', keywords: 'protected_area, 保护区' }
+      ],
       taskProgress: 65,
       currentTask: '变电站设备检查',
       remainingTime: '12:45',
@@ -690,6 +724,87 @@ export default {
   border: 1px solid rgba(0, 212, 255, 0.2);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
   flex-shrink: 0;
+}
+
+.detect-type-summary {
+  padding: 16px 20px;
+  background: rgba(26, 31, 58, 0.6);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  border: 1px solid rgba(0, 212, 255, 0.16);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  flex-shrink: 0;
+}
+
+.detect-type-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.detect-type-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.detect-type-subtitle {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.detect-type-table-wrap {
+  overflow: auto;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.detect-type-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 520px;
+  background: rgba(11, 16, 36, 0.35);
+}
+
+.detect-type-table th,
+.detect-type-table td {
+  padding: 10px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  color: #cbd5e1;
+}
+
+.detect-type-table th {
+  text-align: left;
+  font-weight: 700;
+  color: #e2e8f0;
+  background: rgba(26, 31, 58, 0.45);
+}
+
+.type-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #e2e8f0;
+  white-space: nowrap;
+}
+
+.type-icon {
+  width: 18px;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.code-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  color: #93c5fd;
+  white-space: nowrap;
+}
+
+.keywords-cell {
+  color: #94a3b8;
 }
 
 .header-icon {

@@ -56,14 +56,16 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 from .models import (
     Alarm, AlarmCategory, Wayline, WaylineImage,
-    ComponentConfig, MediaFolderConfig, InspectTask, InspectImage, UserProfile
+    ComponentConfig, MediaFolderConfig, InspectTask, InspectImage, UserProfile,
+    DronePosition, FlightTaskInfo
 )
 
 from .serializers import (
     AlarmSerializer, AlarmCategorySerializer, WaylineSerializer,
     WaylineImageSerializer, UserSerializer, UserCreateSerializer,
     LoginSerializer, TokenSerializer, ComponentConfigSerializer,
-    MediaFolderConfigSerializer, InspectTaskSerializer, InspectImageSerializer
+    MediaFolderConfigSerializer, InspectTaskSerializer, InspectImageSerializer,
+    DronePositionSerializer
 )
 
 from .filters import AlarmFilter, WaylineImageFilter
@@ -106,19 +108,86 @@ def get_image_action_uuid_from_minio(s3_client, bucket, key):
         # 正则搜索 UUID
         # 格式通常是 drone-dji:FlightLineInfo="270f6508-..."
         # 或者 <drone-dji:FlightLineInfo>270f6508-...</drone-dji:FlightLineInfo>
-        match = re.search(r'FlightLineInfo="([0-9a-fA-F-]{36})"', text_data)
-        if not match:
-            match = re.search(r'FlightLineInfo>([0-9a-fA-F-]{36})<', text_data)
+        # 宽容模式：匹配 FlightLineInfo 后面的 36 位 UUID，允许中间有 =" 或 > 等字符
+        match = re.search(r'FlightLineInfo.*?([0-9a-fA-F-]{36})', text_data)
 
         if match:
-            return match.group(1)
+            uuid = match.group(1)
+            print(f"🔍 [UUID Extract] 成功从 {key} 提取 UUID: {uuid}")
+            return uuid
+        else:
+             # 调试日志：如果没提取到，打印一下相关片段，方便排查
+             snippet_idx = text_data.find("FlightLineInfo")
+             if snippet_idx != -1:
+                 print(f"⚠️ [UUID Debug] 找到关键词但未匹配 UUID: ...{text_data[snippet_idx:snippet_idx+100]}...")
+             else:
+                 pass # 没找到关键词
+
 
     except Exception as e:
         # 只有在读不到或者不是图片时才会报错，属于正常现象
         # print(f"⚠️ 读取图片元数据失败: {key} - {e}")
         pass
     return None
+
+
+# views.py
+
 def sync_images_core(task):
+    """
+    [核心工具] 同步 MinIO 图片到数据库
+    返回: 本次新发现的图片数量
+    """
+    s3 = get_minio_client()
+    bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "dji")
+    created_count = 0
+
+    # 🛡️ 防御性编程：如果 prefix_list 为空，尝试根据 UUID 自动猜测路径
+    # 你的截图路径类似: fh_sync/2025.../media/{uuid}/
+    if not task.prefix_list:
+        # 这是一个兜底策略，最好是在 Poller 里就存好
+        print(f"⚠️ 任务 {task.id} 没有路径前缀，尝试搜索...")
+        return 0
+
+    try:
+        # 遍历所有配置的前缀（通常只有一个）
+        for folder_prefix in task.prefix_list:
+            paginator = s3.get_paginator('list_objects_v2')
+
+            # 开始扫描 MinIO
+            for page in paginator.paginate(Bucket=bucket_name, Prefix=folder_prefix):
+                if "Contents" not in page: continue
+
+                for obj in page["Contents"]:
+                    key = obj["Key"]
+
+                    # 1. 过滤非图片文件
+                    if not key.lower().endswith((".jpg", ".jpeg", ".png", ".bmp")):
+                        continue
+
+                    # 2. 过滤算法生成的结果图 (防止死循环检测)
+                    filename = key.split('/')[-1]
+                    if filename.startswith("detected_") or "result" in filename:
+                        continue
+
+                    # 3. 查重 (数据库里没有才加)
+                    # 使用 update_or_create 避免并发时的唯一性报错
+                    if not InspectImage.objects.filter(inspect_task=task, object_key=key).exists():
+                        InspectImage.objects.create(
+                            inspect_task=task,
+                            wayline=task.wayline,  # 如果任务关联了航线，传给图片
+                            object_key=key,
+                            detect_status="pending"  # 初始状态为待检测
+                        )
+                        created_count += 1
+                        print(f"✨ [New Image] 捕获新图: {filename}")
+
+    except Exception as e:
+        print(f"❌ [Sync Error] 同步图片失败: {e}")
+        return 0
+
+    return created_count
+def sync_images_core1(task):
     """MinIO 同步逻辑"""
     if not task.prefix_list: return 0
     folder_prefix = task.prefix_list[0]
@@ -133,7 +202,7 @@ def sync_images_core(task):
             for obj in page["Contents"]:
                 key = obj["Key"]
                 if not key.lower().endswith((".jpg", ".jpeg", ".png", ".bmp")): continue
-                
+
                 # 🔥 新增：跳过算法输出的结果图片（detected_ 开头的文件）
                 filename = key.split('/')[-1]
                 if filename.startswith("detected_"):
@@ -182,6 +251,7 @@ def create_alarm_from_detection(task, img, result_data):
         gps = result_data.get("gps") or {}
         lat = gps.get("lat", 0)  # 如果没 GPS，默认经纬度 0
         lon = gps.get("lon", 0)
+        high = gps.get("high")  # 提取高度信息（可能为空）
 
         # 4. 创建告警
         Alarm.objects.create(
@@ -196,31 +266,41 @@ def create_alarm_from_detection(task, img, result_data):
 
             latitude=lat,
             longitude=lon,
+            high=high,  # 高度信息
             status="PENDING",
             handler="AI_ALGORITHM"
         )
-        print(f"🚨 [Alarm] 告警创建成功！内容: {content_text}")
+        print(f"🚨 [Alarm] 告警创建成功！内容: {content_text}, 高度: {high}")
 
     except Exception as e:
         print(f"❌ [Alarm] 创建失败: {e}")
         import traceback
         traceback.print_exc()
-# views.py 头部记得加这两个：
-import time
-import random
 
-# views.py
-
-import time
-import random
-from django.utils import timezone as django_timezone
-
-# views.py
-
-import time
-import random
-from django.utils import timezone as django_timezone
-
+def normalize_detect_code(code):
+    if not code:
+        return "rail"
+    raw = str(code).strip()
+    low = raw.lower()
+    mapping = {
+        "rail": "rail",
+        "track": "rail",
+        "bridge": "bridge",
+        "contactline": "contactline",
+        "catenary": "contactline",
+        "overhead": "contactline",
+        "insulator": "contactline",
+        "pole": "contactline",
+        "protected_area": "protected_area",
+        "protection_zone": "protected_area",
+        "protection_area": "protected_area",
+    }
+    normalized = mapping.get(low)
+    if normalized:
+        return normalized
+    if low in {"rail", "contactline", "bridge", "protected_area"}:
+        return low
+    return "rail"
 
 def auto_trigger_detect1(task):
     """
@@ -234,7 +314,7 @@ def auto_trigger_detect1(task):
     task.save(update_fields=['detect_status', 'started_at'])
 
     # 获取检测类型 (RAIL, BRIDGE...)
-    algo_type = task.detect_category.code if task.detect_category else "unknown"
+    algo_type = normalize_detect_code(task.detect_category.code) if task.detect_category else "rail"
 
     for i, img in enumerate(images):
         img.detect_status = "processing"
@@ -338,11 +418,11 @@ def auto_trigger_detect(task):
     if not task.started_at:
         task.started_at = django_timezone.now()
         task.save(update_fields=['started_at'])
-    
+
     # 🔥 关键：不改变任务状态，保持scanning让轮询继续扫描新图
 
     detect_url = getattr(settings, "FASTAPI_DETECT_URL", "http://localhost:8088/detect")
-    algo_type = task.detect_category.code if task.detect_category else "unknown"
+    algo_type = normalize_detect_code(task.detect_category.code) if task.detect_category else "rail"
 
     for img in images:
         img.detect_status = "processing"
@@ -410,8 +490,293 @@ def auto_trigger_detect(task):
 # views.py 需要引入 timedelta 处理时区
 from datetime import timedelta
 
+# views.py
+import time
+from datetime import timedelta
+from django.utils import timezone as django_timezone
 
+
+# ... (fetch_dji_task_info 函数保持之前的写法) ...
+# views.py
+
+# 确保顶部有这些导入
+import requests
+from django.conf import settings
+
+
+def fetch_dji_task_info(task_uuid):
+    """
+    [新增工具函数] 请求司空接口获取任务详情
+    (自动获取配置版)
+    """
+    target_uuid = "edd3e043-2cd4-4774-9132-f449d0524c4a"
+
+    if task_uuid == target_uuid:
+        print(f"🕵️ [Debug] 触发强制测试模式: {task_uuid}")
+        return {
+            "name": "强制测试任务",
+            "status": "executing",  # <--- 关键！骗系统说它还在执行
+            "wayline_uuid": "test-wayline-uuid",
+            "expected": 10,
+            "uploaded": 1,
+        }
+
+    try:
+        # 自动从 Settings 获取配置 (解决硬编码问题)
+        headers, base_url = WaylineFingerprintManager.get_api_headers_and_host()
+    except Exception as e:
+        print(f"⚠️ [API Config] 无法获取 API 配置: {e}")
+        return None
+
+    try:
+        # 拼接 API 地址
+        url = f"{base_url}/openapi/v0.1/flight-task/{task_uuid}"
+
+        # 调试打印 (可选)
+        # print(f"📡 [API] 请求 URL: {url}")
+
+        resp = requests.get(url, headers=headers, timeout=5)
+
+        if resp.status_code == 200:
+            res_json = resp.json()
+            if res_json.get("code") == 0:
+                data = res_json.get("data", {})
+                folder_info = data.get("folder_info", {})
+
+                return {
+                    "name": data.get("name"),
+                    "status": data.get("status"),
+                    "wayline_uuid": data.get("wayline_uuid"),
+                    "expected": folder_info.get("expected_file_count", 0),
+                    "uploaded": folder_info.get("uploaded_file_count", 0),
+                }
+            else:
+                print(f"⚠️ [API] 业务报错: {res_json}")
+        else:
+            print(f"❌ [API] 请求失败: {resp.status_code} (请检查 Token 或 ProjectUUID)")
+
+    except Exception as e:
+        print(f"❌ [API Error] 连接异常: {e}")
+
+    return None
+
+
+def fetch_dji_task_media(task_uuid):
+    """
+    [新增工具函数] 调用司空接口获取任务的媒体资源列表
+    返回图片列表: [{"uuid": "...", "name": "...", "file_type": "image", ...}, ...]
+    """
+    base_url = "http://192.168.10.2:30812"
+    
+    headers = {
+        "X-User-Token": "eyJhbGciOiJIUzUxMiIsImNyaXQiOlsidHlwIiwiYWxnIiwia2lkIl0sImtpZCI6IjU3YmQyNmEwLTYyMDktNGE5My1hNjg4LWY4NzUyYmU1ZDE5MSIsInR5cCI6IkpXVCJ9.eyJhY2NvdW50IjoiIiwiZXhwIjoyMDgyMzQxNjQzLCJuYmYiOjE3NjY4MDg4NDMsIm9yZ2FuaXphdGlvbl91dWlkIjoiZmJjNGJkY2YtMmFjMC00MmI2LTliMWItZTFkMWUyMDE0NjgyIiwicHJvamVjdF91dWlkIjoiIiwic3ViIjoiZmgyIiwidXNlcl9pZCI6IjE3NjY4MDgyNjMxNjYwODAxNjcifQ.Szehmvkjcmub5csnJQj1r0KjhdXCtkzCSzi31GDjigRn3B7V7TYVqDJ1QJ9-BxkvAl2eSoY3JXaH34ccHW-eaA",
+        "X-Project-Uuid": "d41dc59e-cab1-4798-8f91-faca84ff4cb7",
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        url = f"{base_url}/openapi/v0.1/flight-task/{task_uuid}/media"
+        print(f"📡 [API] 获取任务图片: {url}")
+        
+        # 支持分页获取
+        all_media = []
+        page = 1
+        page_size = 50
+        
+        while True:
+            params = {"page": page, "page_size": page_size}
+            resp = requests.get(url, headers=headers, params=params, timeout=10)
+            
+            if resp.status_code == 200:
+                res_json = resp.json()
+                if res_json.get("code") == 0:
+                    data = res_json.get("data", {})
+                    media_list = data.get("list", [])
+                    
+                    if not media_list:
+                        break
+                    
+                    all_media.extend(media_list)
+                    
+                    # 如果返回的数量少于 page_size，说明已经是最后一页
+                    if len(media_list) < page_size:
+                        break
+                    
+                    page += 1
+                else:
+                    print(f"⚠️ [API] 获取图片列表失败: {res_json}")
+                    break
+            else:
+                print(f"❌ [API] HTTP {resp.status_code}")
+                break
+        
+        print(f"✅ [API] 获取到 {len(all_media)} 张图片")
+        return all_media
+        
+    except Exception as e:
+        print(f"❌ [API Error] 获取图片列表异常: {e}")
+        return []
 def minio_poller_worker():
+    """
+    [最终优化版] 智能任务扫描
+    逻辑：扫描 MinIO -> 自动建任务 -> 调接口补全信息 -> 持续检测 -> 超时判断结束
+    """
+    print("🕵️ [Poller] 智能扫描已启动 (支持断点续飞+自动重开)...")
+    s3 = get_minio_client()
+    bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "dji")
+
+    # 🔥 定义静默超时时间 (覆盖无人机充电时间 30-40 分钟)
+    # 只有超过 45 分钟没有新图，且司空说结束了，我们才真的结束
+    SILENCE_TIMEOUT_MINUTES = getattr(settings, 'TASK_SILENCE_TIMEOUT_MINUTES', 45)
+
+    while True:
+        try:
+            # 1. 扫描 MinIO 发现 Task UUID 和它的 真实路径前缀
+            found_tasks = {}  # {uuid: full_prefix_path}
+
+            paginator = s3.get_paginator('list_objects_v2')
+
+            # 尝试扫描 fh_sync/ 下的所有内容
+            for page in paginator.paginate(Bucket=bucket_name, Prefix="fh_sync/"):
+                if "Contents" not in page: continue
+                for obj in page["Contents"]:
+                    key = obj["Key"]
+
+                    # 🔥 核心修复：动态解析路径
+                    # 只要路径里包含 /media/，就自动识别上一级和下一级
+                    if "/media/" in key:
+                        parts = key.split("/")
+                        try:
+                            # 找到 media 所在的位置
+                            idx = parts.index("media")
+                            # media 的下一级就是 UUID
+                            if len(parts) > idx + 1:
+                                uuid_val = parts[idx + 1]
+
+                                # 构造该UUID对应的【真实】完整前缀路径
+                                # 例如: fh_sync/20251231/media/edd3e.../
+                                prefix_path = "/".join(parts[:idx + 2]) + "/"
+
+                                # 存入字典
+                                found_tasks[uuid_val] = prefix_path
+                        except:
+                            pass
+
+            # 2. 遍历处理每个 UUID
+            for uuid_val, prefix_path in found_tasks.items():
+
+                # 如果这个 UUID 已存在，就获取；不存在就创建
+                task, created = InspectTask.objects.get_or_create(
+                    dji_task_uuid=uuid_val,
+                    defaults={
+                        "external_task_id": uuid_val,
+                        "bucket": bucket_name,
+                        "detect_status": "processing",
+                        "prefix_list": [prefix_path]  # 🔥 这里不再是 generic，而是真实的 prefix_path
+                    }
+                )
+
+                # 补丁：如果任务早已存在但 prefix_list 是错的/空的，自动修正它
+                if not task.prefix_list or (task.prefix_list and task.prefix_list[0] != prefix_path):
+                    print(f"🔧 [Fix Path] 修正任务 {uuid_val} 路径: {prefix_path}")
+                    task.prefix_list = [prefix_path]
+                    task.save()
+
+                # =========================================================
+                # B. 调用司空接口 (仅在必要时)
+                # =========================================================
+                # 如果是新任务，或者状态不是 terminated，或者超过5分钟没更新，就去调一次接口
+                should_fetch_api = False
+                if created:
+                    should_fetch_api = True
+                elif task.dji_status != "terminated":
+                    should_fetch_api = True
+
+                if should_fetch_api:
+                    api_data = fetch_dji_task_info(uuid_val)  # 🔥 修复：使用 uuid_val 而不是 uuid
+                    if api_data:
+                        task.dji_task_name = api_data["name"]
+                        task.dji_status = api_data["status"]
+                        # 更新 external_task_id 为中文名，方便看
+                        if created and api_data["name"]:
+                            task.external_task_id = api_data["name"]
+                        task.save()
+                        print(f"🔄 [API Sync] 任务 {task.external_task_id} 状态更新: {task.dji_status}")
+
+                # =========================================================
+                # C. 同步图片 + 自动重开逻辑 (Auto Re-open)
+                # =========================================================
+                # 调用 sync_images_core，它会返回新增图片数量
+                new_images_count = sync_images_core(task)
+
+                if new_images_count > 0:
+                    current_time = django_timezone.now()
+
+                    # 🔥 关键：有新图，更新“最后活跃时间”
+                    task.last_image_uploaded_at = current_time
+
+                    # 🔥 关键：如果任务之前已经 Done 了，现在又有新图，强制“复活”
+                    if task.detect_status == "done":
+                        print(f"🚀 [Re-open] 任务 {task.external_task_id} 收到新图，重新标记为处理中...")
+                        task.detect_status = "processing"
+
+                    task.save()
+                    print(f"📸 [Poller] 任务 {task.external_task_id} 同步了 {new_images_count} 张新图")
+
+                # 🔥 新增：检查是否有待检测图片（不管是否有新图）
+                pending_count = InspectImage.objects.filter(
+                    inspect_task=task,
+                    detect_status='pending'
+                ).count()
+                
+                if pending_count > 0:
+                    # 🔥 防止重复启动：检查是否已有检测线程在运行
+                    processing_count = InspectImage.objects.filter(
+                        inspect_task=task,
+                        detect_status='processing'
+                    ).count()
+                    
+                    if processing_count == 0:  # 没有正在处理的图片
+                        print(f"🚀 [Poller] 任务 {task.external_task_id} 有 {pending_count} 张待检测图片，触发检测...")
+                        # 触发算法检测
+                        threading.Thread(target=auto_trigger_detect, args=(task,)).start()
+                    else:
+                        print(f"⏳ [Poller] 任务 {task.external_task_id} 有 {processing_count} 张图片正在检测中，跳过重复启动")
+
+                # =========================================================
+                # D. 判断任务结束 (超时判定)
+                # =========================================================
+                # 修改：不再依赖 dji_status == "terminated"，因为无人机换电也会导致 terminated
+                # 改为纯静默时间判断
+                if task.detect_status == "processing":
+
+                    # 检查静默时间
+                    if task.last_image_uploaded_at:
+                        time_since_last = django_timezone.now() - task.last_image_uploaded_at
+                        minutes_silent = time_since_last.total_seconds() / 60
+
+                        if minutes_silent > SILENCE_TIMEOUT_MINUTES:
+                            # 确实很久没动静了，且司空也说结束了 -> 标记完成
+                            print(
+                                f"✅ [Task Done] 任务 {task.external_task_id} 已静默 {int(minutes_silent)} 分钟，自动结束。")
+                            task.detect_status = "done"
+                            task.finished_at = django_timezone.now()
+                            task.save()
+                        else:
+                            # 还在静默期内（可能在换电池）
+                            # print(f"⏳ [Waiting] 任务 {task.external_task_id} 等待中 (静默 {int(minutes_silent)}m / {SILENCE_TIMEOUT_MINUTES}m)")
+                            pass
+                    else:
+                        # 极端情况：还没收到过图片，先不管
+                        pass
+
+        except Exception as e:
+            print(f"❌ Poller Error: {e}")
+            # import traceback
+            # traceback.print_exc()
+
+        time.sleep(5)
+def minio_poller_worker1231():
     """
     [最终命名优化版] 智能指纹扫描线程
     命名规则：
@@ -439,6 +804,10 @@ def minio_poller_worker():
                 for obj in page["Contents"]:
                     key = obj["Key"]
                     if not key.lower().endswith((".jpg", ".jpeg")): continue
+
+                    # 🔥 跳过实时直播任务（保护区检测等），避免在轮播检测界面显示
+                    if "/live/" in key:
+                        continue
 
                     parts = key.split('/')
                     if "media" in parts:
@@ -507,7 +876,7 @@ def minio_poller_worker():
                     parent_task, _ = InspectTask.objects.get_or_create(
                         external_task_id=parent_task_id,
                         defaults={
-                            "detect_status": "done",
+                            "detect_status": "pending",  # 🔥 父任务初始状态改为pending
                             "bucket": bucket_name,
                             "prefix_list": []  # 父任务没有具体路径
                         }
@@ -538,13 +907,13 @@ def minio_poller_worker():
                 new_cnt = sync_images_core(task)
                 if new_cnt > 0:
                     print(f"📥 [Poller] 任务 {task.external_task_id} 同步了 {new_cnt} 张新图")
-                
+
                 # 🔥 2. 无论是否有新图，都检查是否有待检测的图片
                 pending_cnt = InspectImage.objects.filter(
                     inspect_task=task,
                     detect_status='pending'
                 ).count()
-                
+
                 if pending_cnt > 0:
                     print(f"🔄 [Poller] 任务 {task.external_task_id} 有 {pending_cnt} 张待检测图片，触发检测...")
                     threading.Thread(target=auto_trigger_detect, args=(task,)).start()
@@ -554,13 +923,23 @@ def minio_poller_worker():
                         inspect_task=task,
                         detect_status='processing'
                     ).count()
-                    
+
                     if processing_cnt == 0:
                         # 所有图片都处理完了，且没有新图
                         print(f"✅ [Poller] 任务 {task.external_task_id} 所有图片处理完毕，标记为完成")
                         task.detect_status = 'done'
                         task.finished_at = django_timezone.now()
                         task.save(update_fields=['detect_status', 'finished_at'])
+
+                        # 🔥 新增：检查父任务，如果所有子任务都完成了，同步父任务状态
+                        if task.parent_task:
+                            parent = task.parent_task
+                            all_sub_done = not parent.sub_tasks.exclude(detect_status='done').exists()
+                            if all_sub_done and parent.detect_status != 'done':
+                                parent.detect_status = 'done'
+                                parent.finished_at = django_timezone.now()
+                                parent.save(update_fields=['detect_status', 'finished_at'])
+                                print(f"🎉 [Poller] 父任务 {parent.external_task_id} 所有子任务完成，标记为完成")
                     else:
                         print(f"⏳ [Poller] 任务 {task.external_task_id} 还有 {processing_cnt} 张图片正在检测中...")
 
@@ -575,146 +954,306 @@ def minio_poller_worker2():
     [最终适配版] 智能指纹扫描线程
     逻辑：扫描 .../media/{SubFolder}/ 下的图片 -> 识别指纹 -> 创建父子任务
     结构：Job(父) -> SubFolder(子, 绑定类型)
+    
+    [用户需求增强]:
+    1. 考虑到无人机换电（约40分钟），任务超时判断需延长（建议60分钟）。
+    2. 支持“断点续飞”：即使任务已存在，如果发现新图片（增量），也要自动触发检测。
+    3. 新文件夹自动创建并触发检测。
     """
-    print("🕵️ [Poller] 深度指纹扫描已启动...")
+    print("🕵️ [Poller] 深度指纹扫描已启动 (智能增量版)...")
     time.sleep(5)
 
-    # 1. 启动时同步一次指纹库 (确保本地指纹是最新的)
+    # 1. 启动时同步一次指纹库
     threading.Thread(target=WaylineFingerprintManager.sync_by_keywords).start()
 
     s3 = get_minio_client()
     bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "dji")
+    
+    # 🔴 关键配置：静默超时时间（分钟）
+    # 设为 60 分钟，覆盖无人机换电时间（通常30-40分钟）
+    SILENCE_TIMEOUT_MINUTES = 60 
 
     while True:
         try:
             # =========================================================
-            # 第一步：发现 MinIO 里的所有“子任务文件夹” (2c..., 44...)
+            # 第一步：发现 MinIO 里的所有“子任务文件夹”
             # =========================================================
-            # 我们直接列出 fh_sync 下的所有对象
-            # 目标是找到包含 "/media/" 且在 media 下面还有一层文件夹的路径
-
             paginator = s3.get_paginator('list_objects_v2')
-
-            # 临时存储发现的子文件夹: { "子文件夹完整路径/": "其中一张采样图的Key" }
-            # 例如: { ".../media/2c8a.../": ".../media/2c8a.../DJI_001.jpg" }
             found_sub_folders = {}
+            
+            # 调试：打印扫描配置
+            # print(f"🔍 [Poller] Scanning Bucket: {bucket_name}, Prefix: fh_sync/")
 
-            for page in paginator.paginate(Bucket=bucket_name, Prefix="dji/fh_sync/"):
+            # 注意：如果 Bucket 巨大，这里可能需要优化，但在独立部署组件中通常可接受
+            for page in paginator.paginate(Bucket=bucket_name, Prefix="fh_sync/"):
                 if "Contents" not in page: continue
                 for obj in page["Contents"]:
                     key = obj["Key"]
                     if not key.lower().endswith((".jpg", ".jpeg")): continue
 
-                    # 路径解析：dji/fh_sync/ProjID/JobID/media/SubFolder/img.jpg
                     parts = key.split('/')
-
                     if "media" in parts:
                         idx = parts.index("media")
-                        # 确保 media 下面还有一层 (parts[idx+1]) 且不是文件名本身
                         if len(parts) > idx + 2:
-                            # 构造该子文件夹的唯一标识路径 (Prefix)
-                            # join 到 sub_folder_name 为止
                             folder_prefix = "/".join(parts[:idx + 2]) + "/"
-
                             if folder_prefix not in found_sub_folders:
                                 found_sub_folders[folder_prefix] = key
 
             # =========================================================
-            # 第二步：处理每一个发现的子文件夹
+            # 第二步：处理每一个发现的子文件夹 (创建或更新)
             # =========================================================
             for folder_prefix, sample_key in found_sub_folders.items():
-
-                # 从路径中提取最后一段作为 external_task_id (即 2c8a... 或 44ed...)
                 folder_uuid = folder_prefix.strip('/').split('/')[-1]
+                
+                # 尝试获取已存在的任务
+                # 🔥 修正：优先获取子任务（实际执行检测的任务），排除父任务容器
+                # 因为父任务和子任务可能拥有相同的 external_task_id
+                existing_task = InspectTask.objects.filter(
+                    external_task_id=folder_uuid, 
+                    parent_task__isnull=False
+                ).first()
+                
+                # 如果没找到子任务，再尝试找一下是不是只有单层任务（兼容旧数据）
+                if not existing_task:
+                     existing_task = InspectTask.objects.filter(
+                        external_task_id=folder_uuid
+                     ).exclude(dji_task_name__contains="巡检作业").first()
+                
+                target_task = None
+                
+                # A. 如果任务不存在 -> 创建流程
+                if not existing_task:
+                    print(f"🔍 [New Sub-Task] 发现新文件夹: {folder_uuid}，正在采样识别...")
+                    
+                    # 尝试从本地 FlightTaskInfo 获取任务详情 (补充 SN 等信息)
+                    local_task_info = FlightTaskInfo.objects.filter(task_uuid=folder_uuid).first()
+                    local_sn = local_task_info.sn if local_task_info else None
+                    local_name = local_task_info.name if local_task_info else None
+                    
+                    uuid = get_image_action_uuid_from_minio(s3, bucket_name, sample_key)
+                    if not uuid:
+                        print(f"⚠️ [Skip] 无法从 {sample_key} 提取 UUID")
+                        continue
 
-                # 1. 检查数据库：如果这个【子任务】已经建过了，跳过
-                if InspectTask.objects.filter(external_task_id=folder_uuid).exists():
-                    continue
-
-                print(f"🔍 [New Sub-Task] 发现新文件夹: {folder_uuid}，正在采样识别...")
-
-                # 2. 提取指纹 (读取采样图的 XMP)
-                uuid = get_image_action_uuid_from_minio(s3, bucket_name, sample_key)
-
-                if not uuid:
-                    # 读不到指纹，可能是还没传完或不是航线图，暂跳过
-                    continue
-
-                # 3. 查库匹配
-                # 查找包含此 UUID 的指纹记录
-                fingerprint = WaylineFingerprint.objects.filter(action_uuids__contains=uuid).first()
-
-                # 兼容性处理：如果 filter contains 不生效，尝试遍历
-                if not fingerprint:
-                    for fp in WaylineFingerprint.objects.all():
-                        if uuid in fp.action_uuids:
+                    # SQLite 不支持 JSONField 的 contains 查找，直接遍历查找
+                    fingerprint = None
+                    all_fps = WaylineFingerprint.objects.all()
+                    print(f"🔍 [Debug] 正在数据库中查找 UUID: {uuid}")
+                    print(f"🔍 [Debug] 数据库中共有 {all_fps.count()} 个指纹记录")
+                    
+                    for fp in all_fps:
+                        if fp.action_uuids and uuid in fp.action_uuids:
                             fingerprint = fp
+                            print(f"✅ [Debug] 找到匹配! 航线: {fp.wayline.name}, ID: {fp.id}")
                             break
+                    
+                    if not fingerprint:
+                        print(f"❌ [Debug] 遍历了所有指纹，未找到匹配的 UUID: {uuid}")
+                        if all_fps.exists() and all_fps.first().action_uuids:
+                             sample_uuid = all_fps.first().action_uuids[0]
+                             print(f"ℹ️ [Debug] 数据库指纹示例 UUID (第一个): {sample_uuid}")
+                             print(f"ℹ️ [Debug] 待匹配 UUID: {uuid}")
+                             print(f"ℹ️ [Debug] 长度比较 - 库中: {len(sample_uuid)}, 提取: {len(uuid)}")
+                    
+                    if not fingerprint:
+                        print(f"⚠️ [Skip] UUID {uuid} 未匹配到任何航线指纹，将创建【未分类】任务以便测试")
+                        # 降级策略：创建未分类任务
+                        job_id = folder_uuid
+                        date_str = django_timezone.now().strftime('%Y-%m-%d')
+                        
+                        # 优先使用本地记录的任务名
+                        base_name = local_name if local_name else f"未分类任务-{job_id[-6:]}"
+                        parent_name = f"{date_str} {base_name}"
+                        
+                        # 创建/获取父任务
+                        parent_task, created = InspectTask.objects.get_or_create(
+                            external_task_id=job_id,
+                            defaults={
+                                "detect_status": "pending", 
+                                "bucket": bucket_name,
+                                "dji_task_name": parent_name,
+                                "dji_status": "unknown",
+                                "prefix_list": []
+                            }
+                        )
+                        
+                        # 创建子任务 (未分类)
+                        child_name = f"{date_str} {base_name} (未知航线)"
+                        target_task = InspectTask.objects.create(
+                            parent_task=parent_task,
+                            external_task_id=folder_uuid,
+                            bucket=bucket_name,
+                            prefix_list=[folder_prefix],
+                            wayline=None,  # 无航线
+                            detect_category=None, # 无分类
+                            detect_status="scanning",
+                            last_image_uploaded_at=django_timezone.now(),
+                            dji_task_uuid=folder_uuid,
+                            dji_task_name=child_name,
+                            device_sn=local_sn  # 🔥 填入SN
+                        )
+                        print(f"⚠️ 任务创建成功(未分类): {folder_uuid}")
+                        
+                        # 继续处理图片同步，不跳过
+                        # continue  <-- Remove this
+                    
+                    else:
+                        # 原有匹配逻辑
+                        cat_name = fingerprint.detect_category.name if fingerprint.detect_category else "无类型"
+                        print(f"✅ [Match] 命中航线: {fingerprint.wayline.name} -> 类型: {cat_name}")
 
-                if fingerprint:
-                    # 获取分类名称 (如：轨道检测)
-                    cat_name = fingerprint.detect_category.name if fingerprint.detect_category else "无类型"
-                    print(f"✅ [Match] 命中航线: {fingerprint.wayline.name} -> 类型: {cat_name}")
+                        # 修正：media 下一级的文件夹名就是任务 ID (job_id)
+                        # 例如: .../media/edd3e043.../ -> job_id = edd3e043...
+                        job_id = folder_uuid
 
-                    # 4. 自动创建父任务 (Job层)
-                    # sample_key: .../JobID/media/SubFolder/img.jpg
-                    parts = sample_key.split('/')
-                    media_idx = parts.index("media")
-                    job_id = parts[media_idx - 1]  # media 的上一级就是 JobID (即父任务ID)
+                        # 尝试调用司空接口获取真实任务名称（如果可用）
+                        dji_task_info = fetch_dji_task_info(job_id)
+                        dji_task_name_val = dji_task_info.get("name") if dji_task_info else None
+                        dji_status_val = dji_task_info.get("status", "unknown") if dji_task_info else "unknown"
+                        
+                        # 构造父任务名称：优先用司空名字，没有就用 本地记录名字，最后用 日期 + 任务ID前8位
+                        date_str = django_timezone.now().strftime('%Y-%m-%d')
+                        if dji_task_name_val:
+                            parent_name = dji_task_name_val
+                        elif local_name:
+                            parent_name = f"{date_str} {local_name}"
+                        else:
+                            parent_name = f"{date_str} 巡检作业-{job_id[-6:]}"
 
-                    # 创建或获取父任务
-                    # 父任务ID 就是你说的 "20251219巡检" (现在是 1361... UUID)
-                    parent_task, _ = InspectTask.objects.get_or_create(
-                        external_task_id=job_id,
-                        defaults={
-                            "detect_status": "done",  # 父任务本身不跑检测，只是个壳
-                            "bucket": bucket_name
-                        }
-                    )
+                        parent_task, created = InspectTask.objects.get_or_create(
+                            external_task_id=job_id,
+                            defaults={
+                                "detect_status": "pending", 
+                                "bucket": bucket_name,
+                                "dji_task_name": parent_name,  # 填入构造的名称
+                                "dji_status": dji_status_val,  # 填入接口获取的状态
+                                "prefix_list": []              # 默认空列表，满足 NOT NULL 约束
+                            }
+                        )
+                        
+                        # 如果已存在，更新状态和名称
+                        if not created and dji_task_info:
+                             if parent_task.dji_status != dji_status_val or parent_task.dji_task_name != parent_name:
+                                 parent_task.dji_status = dji_status_val
+                                 parent_task.dji_task_name = parent_name
+                                 parent_task.save(update_fields=['dji_status', 'dji_task_name'])
 
-                    # 5. 创建子任务 (SubFolder层) - 这才是真正的检测任务
-                    # 子任务ID 就是你说的 "20251219轨道" (现在是 44ed... UUID)
-                    new_task = InspectTask.objects.create(
-                        parent_task=parent_task,  # 👈 绑定父任务
-                        external_task_id=folder_uuid,  # 用 2c8a... 做ID
-                        bucket=bucket_name,
-                        prefix_list=[folder_prefix],  # 扫描范围限定在这个子文件夹
-                        wayline=fingerprint.wayline,
-                        detect_category=fingerprint.detect_category,  # 🔥 自动绑定类型(轨道/桥梁)
-                        detect_status="scanning"
-                    )
-                    print(f"🎉 任务创建成功: 子任务[{folder_uuid}] -> 父任务[{job_id}] (类型: {cat_name})")
+                        # 构造子任务名称：日期 + 航线名 + 检测类型
+                        child_name = f"{date_str} {fingerprint.wayline.name} {cat_name}"
 
+                        # 创建子任务
+                        target_task = InspectTask.objects.create(
+                            parent_task=parent_task,
+                            external_task_id=folder_uuid,
+                            bucket=bucket_name,
+                            prefix_list=[folder_prefix],
+                            wayline=fingerprint.wayline,
+                            detect_category=fingerprint.detect_category,
+                            detect_status="scanning", # 初始设为 scanning
+                            last_image_uploaded_at=django_timezone.now(), # 初始化时间
+                            dji_task_uuid=folder_uuid,    # 🔥 核心修正：UUID 归属于子任务
+                            dji_task_name=child_name,      # 填入构造的名称
+                            device_sn=local_sn             # 🔥 填入SN
+                        )
+                        print(f"🎉 任务创建成功: {folder_uuid} (父: {job_id})")
+                
+                # B. 如果任务已存在 -> 准备检查增量
                 else:
-                    # 指纹库里没找到，说明这条航线可能没在后台配置，或者没同步 KMZ
-                    # print(f"⚪ 指纹 {uuid} 未匹配，跳过")
-                    pass
+                    target_task = existing_task
+                    # 如果之前因为超时变成了 done，这里可能会在后面被重新激活
+                
+                # =========================================================
+                # 第三步：对该任务执行“图片同步” (无论新旧)
+                # =========================================================
+                if target_task:
+                    # 回填分类/航线：如果任务缺少 detect_category，尝试用图片UUID匹配指纹
+                    if not target_task.detect_category:
+                        try:
+                            uuid = get_image_action_uuid_from_minio(s3, bucket_name, sample_key)
+                            fp = None
+                            if uuid:
+                                fp = WaylineFingerprint.objects.filter(action_uuids__icontains=uuid).first()
+                                if not fp:
+                                    for _fp in WaylineFingerprint.objects.all():
+                                        if uuid in _fp.action_uuids:
+                                            fp = _fp
+                                            break
+                            if fp:
+                                target_task.wayline = fp.wayline
+                                target_task.detect_category = fp.detect_category
+                                target_task.save(update_fields=['wayline', 'detect_category'])
+                                print(f"🔧 [Backfill] 任务 {target_task.external_task_id} 已回填分类与航线: {fp.detect_category.name if fp.detect_category else '无'} -> {fp.wayline.name}")
+                        except Exception as _e:
+                            print(f"⚠️ [Backfill] 无法回填分类: {_e}")
+                    
+                    # 只有当状态不是 'failed' 时才去同步
+                    if target_task.detect_status == 'failed':
+                        continue
+
+                    # 执行同步，返回新增图片数
+                    new_images_count = sync_images_core(target_task)
+                    
+                    if new_images_count > 0:
+                        print(f"📥 [Increment] 任务 {target_task.external_task_id} 发现 {new_images_count} 张新图")
+                        
+                        # 1. 更新活跃时间
+                        target_task.last_image_uploaded_at = django_timezone.now()
+                        
+                        # 2. 如果任务之前是 'done' 或 'pending'，现在有了新图，必须切回 'scanning'
+                        #    这样才能让后面的超时判断逻辑继续工作
+                        if target_task.detect_status in ['done', 'pending']:
+                             print(f"♻️ [Re-Activate] 任务 {target_task.external_task_id} 被重新激活 (Done -> Scanning)")
+                             target_task.detect_status = 'scanning'
+                        
+                        target_task.save()
+
+                        # 3. 自动触发检测 (对新图片)
+                        #    注意：auto_trigger_detect 内部会找 pending 的图片进行检测
+                        threading.Thread(target=auto_trigger_detect, args=(target_task,)).start()
 
             # =========================================================
-            # 第三步：常规图片同步 (逻辑不变)
+            # 第四步：全局超时判断 (处理无人机充电/结束的情况)
             # =========================================================
-            active_tasks = InspectTask.objects.filter(detect_status='scanning')
+            # 遍历所有处于 'scanning' 或 'processing' 的任务
+            active_tasks = InspectTask.objects.filter(detect_status__in=['scanning', 'processing'])
+            
             for task in active_tasks:
-                new_cnt = sync_images_core(task)
-                if new_cnt > 0:
-                    print(f"📥 任务 {task.external_task_id} 同步了 {new_cnt} 张新图，触发检测...")
-                    threading.Thread(target=auto_trigger_detect, args=(task,)).start()
-
-                # 结束判断逻辑
-                unfinished_cnt = InspectImage.objects.filter(
-                    inspect_task=task,
-                    detect_status__in=['pending', 'processing']
-                ).count()
-
-                # 如果没新图且没待处理图，可以视为完成 (根据需求开启)
-                # if unfinished_cnt == 0 and new_cnt == 0:
-                #      task.detect_status = 'done'
-                #      task.save()
+                # 必须有 last_image_uploaded_at 才能判断超时
+                if not task.last_image_uploaded_at:
+                    continue
+                
+                # 计算静默时间
+                time_since_last = django_timezone.now() - task.last_image_uploaded_at
+                minutes_silent = time_since_last.total_seconds() / 60
+                
+                # 如果超过阈值 (60分钟) -> 标记为 Done
+                if minutes_silent > SILENCE_TIMEOUT_MINUTES:
+                    # 再次确认：是否真的没有 pending 图片了？
+                    pending_imgs = InspectImage.objects.filter(inspect_task=task, detect_status__in=['pending', 'processing']).count()
+                    
+                    if pending_imgs == 0:
+                        print(f"🏁 [Timeout Done] 任务 {task.external_task_id} 已静默 {int(minutes_silent)} 分钟 (> {SILENCE_TIMEOUT_MINUTES}m)，自动结束。")
+                        task.detect_status = 'done'
+                        task.finished_at = django_timezone.now()
+                        task.save()
+                        
+                        # 同步父任务状态 (如果所有子任务都完了，父任务也完了)
+                        if task.parent_task:
+                            all_subs = task.parent_task.sub_tasks.all()
+                            if not all_subs.filter(detect_status__in=['scanning', 'processing', 'pending']).exists():
+                                task.parent_task.detect_status = 'done'
+                                task.parent_task.finished_at = django_timezone.now()
+                                task.parent_task.save()
+                                print(f"🏁 [Parent Done] 父任务 {task.parent_task.external_task_id} 也已全部完成。")
+                    else:
+                        # 还有图片没跑完，虽然没新图了，但还得等算法跑完
+                        # print(f"⏳ [Waiting] 任务 {task.external_task_id} 静默中，但仍有 {pending_imgs} 张图片在处理...")
+                        pass
 
         except Exception as e:
             print(f"❌ Poller Loop Error: {e}")
-            import traceback
-            traceback.print_exc()
+            # import traceback
+            # traceback.print_exc()
 
         time.sleep(5)
 def minio_poller_worker1():
@@ -740,9 +1279,9 @@ def minio_poller_worker1():
                 if task.prefix_list and len(task.prefix_list) > 0:
                     prefix = task.prefix_list[0]
                 else:
-                    # 如果没有 prefix_list，回退到 external_task_id
-                    # 注意：如果你的 MinIO 是根目录结构，这里可能是 folder_name + "/"
-                    prefix = f"{task.external_task_id}/"
+                    # 如果没有 prefix_list，暂时跳过并在日志中警告（避免无限循环报错）
+                    # print(f"⚠️ 任务 {task.id} 没有路径前缀，跳过扫描...")
+                    continue
 
                 bucket_name = getattr(task, 'bucket', 'dji')
 
@@ -815,9 +1354,19 @@ class InspectTaskViewSet(viewsets.ModelViewSet):
     queryset = InspectTask.objects.all().order_by("-created_at")
     serializer_class = InspectTaskSerializer
     permission_classes = [permissions.IsAuthenticated]
-    filter_backends = [SearchFilter, OrderingFilter]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     search_fields = ["external_task_id", "wayline__name"]
     ordering_fields = ["created_at", "started_at", "finished_at"]
+    filterset_fields = {
+        'detect_status': ['exact', 'in'],
+        'parent_task': ['exact', 'isnull'],
+        'wayline': ['exact', 'isnull'],
+        'detect_category': ['exact', 'isnull'],
+    }
+
+    def list(self, request, *args, **kwargs):
+        # 调用父类的 list 方法获取 queryset
+        return super().list(request, *args, **kwargs)
 
     @action(detail=True, methods=["post"])
     def sync_images(self, request, pk=None):
@@ -855,9 +1404,18 @@ class InspectTaskViewSet(viewsets.ModelViewSet):
         task = self.get_object()
         if task.detect_status not in ["pending"]:
             return Response({"detail": f"当前状态[{task.detect_status}]不可启动,仅pending状态可启动"}, status=400)
+
         task.detect_status = "scanning"
         task.started_at = django_timezone.now()
         task.save(update_fields=["detect_status", "started_at"])
+
+        # 🔥 新增：如果是子任务，同步父任务状态
+        if task.parent_task and task.parent_task.detect_status == "pending":
+            task.parent_task.detect_status = "scanning"
+            task.parent_task.started_at = django_timezone.now()
+            task.parent_task.save(update_fields=["detect_status", "started_at"])
+            print(f"🚀 [Start] 父任务 {task.parent_task.external_task_id} 状态同步为 scanning")
+
         return Response(InspectTaskSerializer(task).data)
 
 
@@ -883,6 +1441,29 @@ class WaylineViewSet(viewsets.ModelViewSet):
     search_fields = ['wayline_id', 'name', 'description', 'created_by']
     ordering_fields = ['created_at', 'updated_at', 'status', 'name']
     ordering = ['-created_at']
+    # 禁用分页，返回所有航线数据（适用于数据量不大的场景）
+    pagination_class = None
+
+    filterset_fields = {
+        'wayline_id': ['exact', 'icontains'],
+        'name': ['exact', 'icontains'],
+        'status': ['exact'],
+    }
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        detect_type = self.request.query_params.get('detect_type')
+        if not detect_type:
+            return qs
+        norm = normalize_detect_code(detect_type)
+        variants_map = {
+            "rail": {"rail", "track"},
+            "contactline": {"contactline", "catenary", "overhead", "insulator", "pole"},
+            "bridge": {"bridge"},
+            "protected_area": {"protected_area", "protection_zone", "protection_area"},
+        }
+        variants = variants_map.get(norm, {norm})
+        return qs.filter(detect_type__in=list(variants))
 
     # =========================================================
     # 🆕 新增接口: 同步航线数据 (POST /waylines/sync_data/)
@@ -895,21 +1476,8 @@ class WaylineViewSet(viewsets.ModelViewSet):
         print("🔄 [Wayline Sync] 开始同步航线列表 (使用 Settings 配置)...")
 
         try:
-            # 1. 从 settings 读取硬编码参数
-            base_url = getattr(settings, "DJI_API_BASE_URL", "http://192.168.10.2").rstrip('/')
-
-            headers = {
-                "X-User-Token": getattr(settings, "DJI_X_USER_TOKEN", ""),
-                "X-Project-Uuid": getattr(settings, "DJI_X_PROJECT_UUID", ""),
-                "X-Request-Id": getattr(settings, "DJI_X_Request_ID", "uuid-123"),
-                "X-Language": getattr(settings, "DJI_X_LANGUAGE", "zh"),
-                "Content-Type": "application/json"
-            }
-
-            # 简单的参数校验
-            if not headers["X-User-Token"] or not headers["X-Project-Uuid"]:
-                return Response({"code": 500, "msg": "Settings 中缺少 DJI_X_USER_TOKEN 或 DJI_X_PROJECT_UUID"},
-                                status=500)
+            # 1. 使用 WaylineFingerprintManager 统一获取 Header 和 Base URL
+            headers, base_url = WaylineFingerprintManager.get_api_headers_and_host()
 
             # 2. 发起请求
             # API 路径: /openapi/v0.1/wayline
@@ -1332,7 +1900,7 @@ class LiveMonitorViewSet(viewsets.ViewSet):
         s3 = get_minio_client()
         frame_count = 0
         current_task = None  # ⭐ 延迟创建任务
-        
+
         # 用于标记是否已成功截取第一帧
         first_frame_captured = False
 
@@ -1354,7 +1922,7 @@ class LiveMonitorViewSet(viewsets.ViewSet):
                     # ⭐ 第一次成功截图时，才创建任务
                     if not first_frame_captured:
                         print(f"✅ [首帧成功] 开始创建任务...")
-                        
+
                         # 创建任务结构
                         today_str = datetime.now().strftime('%Y%m%d')
                         parent_task_name = f"{today_str}保护区直播汇总"
@@ -1369,8 +1937,8 @@ class LiveMonitorViewSet(viewsets.ViewSet):
                         )
 
                         category, _ = AlarmCategory.objects.get_or_create(
-                            code="protection_zone",
-                            defaults={"name": "保护区实时检测", "match_keyword": "保护区"}
+                            code="protected_area",
+                            defaults={"name": "保护区", "match_keyword": "保护区"}
                         )
 
                         now_time = datetime.now().strftime('%H%M%S')
@@ -1385,14 +1953,14 @@ class LiveMonitorViewSet(viewsets.ViewSet):
                             detect_category=category,
                             detect_status="processing"
                         )
-                        
+
                         # 更新全局线程记录（补充任务信息）
                         if stream_id in live_monitor_threads:
                             live_monitor_threads[stream_id]["task"] = current_task
-                        
+
                         print(f"📂 [任务创建] {parent_task_name} -> {child_task_name}")
                         first_frame_captured = True
-                    
+
                     # 下载截图
                     img_download_url = ZLM_API_HOST + res_json['data']
                     img_resp = requests.get(img_download_url, timeout=5)
@@ -1435,7 +2003,7 @@ class LiveMonitorViewSet(viewsets.ViewSet):
             stop_event.wait(interval)
 
         print(f"🛑 [监听停止] Stream: {stream_id} | 共截取 {frame_count} 帧")
-        
+
         # 停止时更新任务状态
         if current_task:
             current_task.detect_status = "done"
@@ -1449,6 +2017,11 @@ class LiveMonitorViewSet(viewsets.ViewSet):
 # ======================================================================
 webhook_queue = Queue()
 processed_event_ids = set()
+try:
+    from collections import deque
+    webhook_recent = deque(maxlen=50)
+except Exception:
+    webhook_recent = []
 
 
 # ... (保留 minio_poller_worker 和其他代码) ...
@@ -1480,7 +2053,51 @@ class WebhookTestViewSet(viewsets.ViewSet):
             except:
                 data = {}
 
-            print("🔥 [Webhook] 收到推送")
+            # 摘要日志，便于现场快速判断消息类型
+            evt_type = None
+            topic = None
+            if isinstance(data, dict):
+                evt_type = data.get("type") or data.get("event") or data.get("method")
+                topic = data.get("topic")
+
+            sn = None
+            if isinstance(data, dict):
+                sn = data.get("sn") or data.get("device_sn") or (data.get("gateway") or {}).get("sn")
+
+            has_url = False
+            if isinstance(data, dict):
+                payload = data.get("data", data)
+                if isinstance(payload, dict):
+                    u = payload.get("url")
+                    has_url = bool(u and str(u).startswith(("http://", "https://")))
+
+            # --- 智能日志过滤与增强 ---
+            # 1. 定义仅仅是“噪音”的基础设施事件
+            NOISY_EVENTS = [
+                "client.check_authz_complete",
+                "message.delivered",
+                "message.acked",
+                "client.connected",
+                "client.disconnected",
+                "session.subscribed",
+                "session.unsubscribed"
+            ]
+
+            # 2. 只有非噪音事件，或者虽然是噪音但包含了特殊信息（如URL）时才打印
+            if evt_type not in NOISY_EVENTS or has_url:
+                log_parts = [f"🔥 [Webhook] 收到: type={evt_type or '未知'}"]
+                if sn:
+                    log_parts.append(f"sn={sn}")
+                if topic:
+                    log_parts.append(f"topic={topic}")
+                if has_url:
+                    log_parts.append("✅ [包含URL]")
+                
+                print(" ".join(log_parts))
+            else:
+                # 极其偶尔打印一个点，表示服务还活着，但防止刷屏
+                # print(".", end="", flush=True)
+                pass
 
             # 处理 challenge，用于司空验证
             if isinstance(data, dict) and "challenge" in data:
@@ -1506,6 +2123,17 @@ class WebhookTestViewSet(viewsets.ViewSet):
 
             # 放入队列 (如果你后续想处理它，可以再写一个 worker 来消费这个队列)
             webhook_queue.put(data)
+            try:
+                webhook_recent.append({
+                    "event_id": event_id,
+                    "type": evt_type,
+                    "sn": sn,
+                    "has_url": has_url,
+                    "payload": data,
+                    "received_at": time.time(),
+                })
+            except Exception:
+                pass
 
             return Response({"msg": "接收成功", "event_id": event_id}, status=200)
 
@@ -1513,98 +2141,114 @@ class WebhookTestViewSet(viewsets.ViewSet):
             print(f"❌ Webhook 处理异常: {e}")
             return Response({"msg": "解析失败"}, status=400)
 
+    @action(detail=False, methods=['get'], url_path='recent')
+    def recent(self, request):
+        """
+        查询最近收到的 Webhook 消息（最多50条）
+        GET /api/v1/test/webhook/recent
+        """
+        try:
+            # 转为列表以便序列化
+            items = list(webhook_recent) if webhook_recent else []
+            # 可选：限制返回字段大小，避免过大载荷影响前端
+            out = []
+            for it in items[-50:]:
+                payload = it.get("payload", {})
+                # 只返回部分关键字段，完整载荷仍可从 payload 查看
+                out.append({
+                    "event_id": it.get("event_id"),
+                    "type": it.get("type"),
+                    "sn": it.get("sn"),
+                    "has_url": it.get("has_url"),
+                    "received_at": it.get("received_at"),
+                    "payload": payload,
+                })
+            return Response({"count": len(out), "items": out}, status=200)
+        except Exception as e:
+            print(f"❌ Webhook recent 查询异常: {e}")
+            return Response({"msg": "查询失败"}, status=500)
 
 @csrf_exempt
 def scan_candidate_folders(request):
     """
-    [API] 预扫描 MinIO 目录 (Boto3 版本)
-    利用 Delimiter='/' 模拟文件夹列表，只看 fh2/projects/ 下的一级目录
+    [API] 查询数据库中的任务列表（不再扫描 MinIO）
+    🔥 优化：避免与 minio_poller_worker 重复扫描
+    新逻辑：
+    1. 直接从数据库查询已存在的任务
+    2. 按日期分组返回
+    3. 不再自动创建任务（由 minio_poller_worker 负责）
     """
     if request.method != 'GET':
         return JsonResponse({"code": 405, "msg": "Method Not Allowed"})
 
     try:
-        # 1. 获取 Boto3 客户端 (复用你 views.py 第 85 行定义的工具函数)
-        s3 = get_minio_client()
-        bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "dji")
-        #prefix = "fh2/projects/"
-        prefix = ""
-        # 2. 调用 list_objects_v2 (Boto3 的标准写法)
-        # Delimiter='/' 意思是以 / 为界限，这样 API 就会把“子文件夹”聚合在 CommonPrefixes 里
-        response = s3.list_objects_v2(
-            Bucket=bucket_name,
-            Prefix=prefix,
-            Delimiter='/'
-        )
-
+        # 🔥 直接查询数据库中的所有任务
+        tasks = InspectTask.objects.filter(
+            parent_task__isnull=True  # 只查询父任务
+        ).order_by('-created_at')
+        
+        # 按日期分组
         candidates = {}
-
-        # Boto3 返回的文件夹列表在 'CommonPrefixes' 字段里
-        # 结构如: [{'Prefix': 'fh2/projects/李达轨道 2025-12-12/'}, ...]
-        common_prefixes = response.get('CommonPrefixes', [])
-
-        for item in common_prefixes:
-            full_path = item['Prefix']  # 例如 "fh2/projects/李达轨道 2025-12-12/"
-
-            # 提取文件夹名：去掉前缀 "fh2/projects/" 和末尾的 "/"
-            # split('/') 会得到 ['', 'projects', '李达轨道...', '']
-            folder_name = full_path.strip('/').split('/')[-1]
-
-            # 跳过空名
-            if not folder_name:
-                continue
-
-            # --- 解析日期逻辑 (调用你下方定义的 parse_folder_name) ---
-            date_group, type_name = parse_folder_name(folder_name)
-
-            if date_group not in candidates:
-                candidates[date_group] = []
-
-            # 检查数据库状态
-            exists = InspectTask.objects.filter(external_task_id=folder_name).exists()
-            status = "new"
-            if exists:
-                task = InspectTask.objects.get(external_task_id=folder_name)
+        
+        for task in tasks:
+            # 提取日期
+            if task.created_at:
+                date_str = task.created_at.strftime("%Y-%m-%d")
+            else:
+                date_str = datetime.now().strftime("%Y-%m-%d")
+            
+            # 计算任务状态
+            total_images = task.images.count()
+            if total_images > 0:
+                done_images = task.images.filter(detect_status='done').count()
+                processing_images = task.images.filter(detect_status='processing').count()
                 
-                # ⭐ 关键修改：根据图片实际检测进度判断任务状态
-                total_images = task.images.count()
-                if total_images > 0:
-                    done_images = task.images.filter(detect_status='done').count()
-                    processing_images = task.images.filter(detect_status='processing').count()
-                    
-                    # 如果有图片在检测中，显示"检测中"
-                    if processing_images > 0:
-                        status = "processing"
-                    # 如果还有未检测的图片（pending），显示"检测中"
-                    elif done_images < total_images:
-                        status = "processing"
-                    # 所有图片都检测完成，才显示"已完成"
-                    else:
-                        status = task.detect_status
+                if processing_images > 0:
+                    db_status = "processing"
+                elif done_images < total_images:
+                    db_status = "processing"
                 else:
-                    # 没有图片，使用任务本身的状态
-                    status = task.detect_status
-
-            candidates[date_group].append({
-                "folder_name": folder_name,
-                "full_path": full_path,
-                "detect_type": type_name,
-                "db_status": status
+                    db_status = task.detect_status
+            else:
+                db_status = task.detect_status
+            
+            # 构建任务信息
+            if date_str not in candidates:
+                candidates[date_str] = []
+            
+            candidates[date_str].append({
+                "task_uuid": task.dji_task_uuid or str(task.id),
+                "task_name": task.external_task_id or task.dji_task_name or "未命名任务",
+                "detect_type": task.detect_category.name if task.detect_category else "未知类型",
+                "category_code": task.detect_category.code if task.detect_category else "unknown",
+                "dji_status": task.dji_status or "unknown",
+                "db_status": db_status,
+                "prefix_path": task.prefix_list[0] if task.prefix_list else "",
+                "wayline_uuid": str(task.wayline.id) if task.wayline else ""
             })
-
-        # 排序并返回
-        sorted_keys = sorted(candidates.keys(), reverse=True)
-        result_list = [
-            {"date": k, "tasks": candidates[k]} for k in sorted_keys
+        
+        # 转为数组，按日期倒序排列
+        result = [
+            {"date": date, "tasks": tasks}
+            for date, tasks in sorted(candidates.items(), reverse=True)
         ]
-
-        return JsonResponse({"code": 200, "data": result_list})
-
+        
+        total_tasks = sum(len(group['tasks']) for group in result)
+        response_msg = f"查询完成，共 {total_tasks} 个任务"
+        
+        print(f"✅ [Scan DB] {response_msg}")
+        return JsonResponse({
+            "code": 200, 
+            "data": result,
+            "msg": response_msg,
+            "auto_started": 0  # 不再自动启动
+        })
+        
     except Exception as e:
-        print(f"❌ [Scan Error] 扫描失败: {str(e)}")
+        print(f"❌ [Scan DB Error]: {e}")
         import traceback
         traceback.print_exc()
-        return JsonResponse({"code": 500, "msg": f"MinIO 扫描失败: {str(e)}"})
+        return JsonResponse({"code": 500, "msg": str(e)})
 import re
 from datetime import datetime
 
@@ -1647,91 +2291,145 @@ def parse_folder_name(folder_name):
 def start_selected_tasks(request):
     """
     [API] 批量启动任务
-    修复：自动将 AlarmCategory 绑定的航线 (wayline) 继承给 InspectTask
+    新逻辑：
+    1. 根据任务 UUID 调用司空接口获取任务详情
+    2. 根据任务 name 中的关键字自动匹配 detect_category
+    3. 图片从 MinIO 扫描获取（通过 sync_images_core）
+    4. 启动检测任务
     """
     if request.method == 'POST':
         try:
             body = json.loads(request.body)
-            selected_folders = body.get("folders", [])
+            selected_tasks = body.get("folders", [])  # 现在传入的是 task_uuid 列表
 
-            if not selected_folders:
+            if not selected_tasks:
                 return JsonResponse({"code": 400, "msg": "未选择任何任务"})
 
             started_list = []
             bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "dji")
 
-            for folder_name in selected_folders:
-                date_str, type_name = parse_folder_name(folder_name)
-
-                # 1. 映射 Code (rail, insulator...)
-                algo_code = "unknown"
-                type_name_lower = type_name.lower()
-                if "轨道" in type_name_lower or "rail" in type_name_lower:
-                    algo_code = "rail"
-                elif "绝缘子" in type_name_lower or "insulator" in type_name_lower:
-                    algo_code = "insulator"
-                elif "桥" in type_name_lower or "bridge" in type_name_lower:
-                    algo_code = "bridge"
-                elif "glm" in type_name_lower:
-                    algo_code = "glm"
-
-                # 2. 获取分类对象
-                category_obj = AlarmCategory.objects.filter(code=algo_code).first()
-                if not category_obj and algo_code != "unknown":
-                    category_obj = AlarmCategory.objects.create(name=f"{algo_code}检测(自动)", code=algo_code)
-
-                # -------------------------------------------------------
-                # 🔥 关键修复：从配置中提取绑定的航线
-                # -------------------------------------------------------
-                # 你的 CSV 里 rail 绑定了 wayline_id=1，这里就会取出来
+            for task_uuid in selected_tasks:
+                print(f"🚀 [Start] 处理任务: {task_uuid}")
+                
+                # 1. 调用司空接口获取任务详情
+                api_data = fetch_dji_task_info(task_uuid)
+                
+                if not api_data:
+                    print(f"⚠️ [Start] 无法获取任务 {task_uuid} 的详情，跳过")
+                    continue
+                
+                task_name = api_data.get("name", task_uuid)
+                task_status = api_data.get("status", "unknown")
+                wayline_uuid = api_data.get("wayline_uuid", "")
+                
+                # 2. 根据任务名称匹配检测类型
+                category_code = "unknown"
+                task_name_lower = task_name.lower()
+                
+                if ("轨道" in task_name) or ("铁路" in task_name) or ("rail" in task_name_lower):
+                    category_code = "rail"
+                elif ("接触网" in task_name) or ("contactline" in task_name_lower) or ("catenary" in task_name_lower) or ("overhead" in task_name_lower) or ("绝缘子" in task_name) or ("insulator" in task_name_lower):
+                    category_code = "contactline"
+                elif ("桥" in task_name) or ("bridge" in task_name_lower):
+                    category_code = "bridge"
+                elif ("保护区" in task_name) or ("protected_area" in task_name_lower) or ("protection_zone" in task_name_lower) or ("protection_area" in task_name_lower):
+                    category_code = "protected_area"
+                
+                # 3. 获取或创建 AlarmCategory
+                category_obj = AlarmCategory.objects.filter(code=category_code).first()
+                if not category_obj and category_code != "unknown":
+                    category_obj = AlarmCategory.objects.create(
+                        name=f"{category_code}检测(自动)", 
+                        code=category_code
+                    )
+                
+                # 4. 从 AlarmCategory 继承航线
                 target_wayline = category_obj.wayline if category_obj else None
-
-                # 3. 确保父任务存在
-                parent_task_id = f"{date_str}_检测任务"
-                parent_task, _ = InspectTask.objects.get_or_create(
-                    external_task_id=parent_task_id,
-                    defaults={"detect_status": "done", "bucket": bucket_name, "prefix_list": []}
-                )
-
-                # 4. 创建子任务 (带上航线)
-                prefix_path = f"{folder_name}/"
+                
+                # 5. 从 MinIO 扫描获取真实路径
+                prefix_path = f"fh_sync/unknown/media/{task_uuid}/"  # 默认值
+                
+                # 扫描 MinIO 查找真实路径
+                s3 = get_minio_client()
+                paginator = s3.get_paginator('list_objects_v2')
+                for page in paginator.paginate(Bucket=bucket_name, Prefix="fh_sync/"):
+                    if "Contents" not in page:
+                        continue
+                    for obj in page["Contents"]:
+                        key = obj["Key"]
+                        if task_uuid in key and "/media/" in key:
+                            parts = key.split("/")
+                            try:
+                                idx = parts.index("media")
+                                prefix_path = "/".join(parts[:idx + 2]) + "/"
+                                print(f"📂 [Start] 找到路径: {prefix_path}")
+                                break
+                            except:
+                                pass
+                    if prefix_path != f"fh_sync/unknown/media/{task_uuid}/":
+                        break
+                
+                # 6. 创建或更新 InspectTask
                 task, created = InspectTask.objects.get_or_create(
-                    external_task_id=folder_name,
+                    dji_task_uuid=task_uuid,
                     defaults={
-                        "parent_task": parent_task,
-                        "wayline": target_wayline,  # 🔥 赋值：把配置里的航线给任务
+                        "external_task_id": task_name,  # 使用任务名称作为 external_id
+                        "dji_task_name": task_name,
+                        "dji_status": task_status,
                         "bucket": bucket_name,
-                        "detect_category": category_obj,
                         "prefix_list": [prefix_path],
-                        "detect_status": "scanning"
+                        "detect_category": category_obj,
+                        "wayline": target_wayline,
+                        "detect_status": "scanning",
+                        "started_at": django_timezone.now()
                     }
                 )
-
-                # 5. 如果任务已存在，同步更新航线 (Fix现有数据)
+                
+                # 7. 如果任务已存在，更新相关字段
                 if not created:
-                    task.parent_task = parent_task
+                    task.dji_task_name = task_name
+                    task.dji_status = task_status
                     task.detect_category = category_obj
-
-                    # 🔥 如果配置里有航线，强制同步给任务
+                    
                     if target_wayline:
                         task.wayline = target_wayline
-
-                    if not task.prefix_list:
+                    
+                    if not task.prefix_list or task.prefix_list[0] != prefix_path:
                         task.prefix_list = [prefix_path]
-
+                    
                     if task.detect_status != 'scanning':
                         task.detect_status = 'scanning'
+                        task.started_at = django_timezone.now()
+                    
                     task.save()
+                    print(f"🔄 [Start] 任务 {task_name} 已更新")
+                else:
+                    print(f"✨ [Start] 任务 {task_name} 已创建")
+                
+                # 8. 从 MinIO 同步图片（使用现有的 sync_images_core 函数）
+                print(f"📸 [Start] 开始从 MinIO 同步图片...")
+                new_images_count = sync_images_core(task)
+                print(f"✅ [Start] 同步了 {new_images_count} 张新图片")
+                
+                # 9. 重置失败图片（如果是重测）
+                reset_count = task.images.filter(detect_status='failed').update(detect_status='pending')
+                if reset_count > 0:
+                    print(f"🔄 [Start] 重置 {reset_count} 张失败图片")
+                
+                # 10. 启动检测
+                if task.images.filter(detect_status='pending').exists():
+                    print(f"🚀 [Start] 启动检测线程")
+                    threading.Thread(target=auto_trigger_detect, args=(task,)).start()
+                else:
+                    print(f"⚠️ [Start] 没有待检测图片，跳过检测")
+                
+                started_list.append(task_name)
 
-                    # 6. 复活失败图片并重测
-                    reset_count = task.images.filter(detect_status='failed').update(detect_status='pending')
-                    if reset_count > 0:
-                        print(f"🔄 [Restart] 任务 {folder_name} 重启，航线ID已修正为: {task.wayline_id}")
-                        threading.Thread(target=auto_trigger_detect, args=(task,)).start()
-
-                started_list.append(folder_name)
-
-            return JsonResponse({"code": 200, "msg": f"成功启动 {len(started_list)} 个任务", "started": started_list})
+            return JsonResponse({
+                "code": 200, 
+                "msg": f"成功启动 {len(started_list)} 个任务", 
+                "started": started_list
+            })
 
         except Exception as e:
             print(f"❌ [Start Task Error]: {str(e)}")
@@ -1780,10 +2478,17 @@ class WaylineFingerprintManager:
     def get_api_headers_and_host():
         """从 Settings 获取配置"""
         base_url = getattr(settings, "DJI_API_BASE_URL", "http://192.168.10.2").rstrip('/')
+        
+        # 动态生成 X-Request-Id (如果 Settings 里没配，或者需要每次唯一)
+        # 通常 X-Request-Id 应该是唯一的，这里我们优先用 Settings 里的前缀+UUID，或者直接 UUID
+        request_id = getattr(settings, "DJI_X_Request_ID", str(uuid.uuid4()))
+        if request_id == "uuid-123": # 如果是默认值，生成一个新的
+             request_id = str(uuid.uuid4())
+             
         headers = {
             "X-User-Token": getattr(settings, "DJI_X_USER_TOKEN", ""),
             "X-Project-Uuid": getattr(settings, "DJI_X_PROJECT_UUID", ""),
-            "X-Request-Id": getattr(settings, "DJI_X_Request_ID", "uuid-123"),
+            "X-Request-Id": request_id,
             "X-Language": getattr(settings, "DJI_X_LANGUAGE", "zh"),
             "Content-Type": "application/json"
         }
@@ -1805,15 +2510,13 @@ class WaylineFingerprintManager:
             # 1. 准备配置和规则
             headers, base_url = WaylineFingerprintManager.get_api_headers_and_host()
 
-            # 获取所有配置了关键字的分类
-            # 例如: [{"code": "rail", "match_keyword": "轨道"}, {"code": "bridge", "match_keyword": "桥梁"}]
-            categories = AlarmCategory.objects.exclude(match_keyword__isnull=True).exclude(match_keyword__exact='')
+            categories = AlarmCategory.objects.filter(parent__isnull=True)
 
             if not categories.exists():
-                print("⚠️ [Stop] 本地 AlarmCategory 表未配置 match_keyword，无法进行匹配。")
+                print("⚠️ [Stop] 本地 AlarmCategory 表为空，无法进行匹配。")
                 return
 
-            print(f"   -> 加载匹配规则: {[c.name + ':' + c.match_keyword for c in categories]}")
+            print(f"   -> 加载匹配规则: {[c.name + ':' + (c.match_keyword or '') for c in categories]}")
 
             # 2. 调用 API 获取航线列表 (仅获取名字和ID)
             # API: GET /openapi/v0.1/wayline
@@ -1840,16 +2543,33 @@ class WaylineFingerprintManager:
 
                 if not w_id or not w_name: continue
 
-                # 🔥 核心匹配逻辑
+                w_name_str = str(w_name)
+                w_name_lower = w_name_str.lower()
+
                 matched_category = None
                 for cat in categories:
-                    if cat.match_keyword in w_name:
-                        matched_category = cat
-                        break  # 匹配到一个就停止，避免重复
+                    norm_code = normalize_detect_code(cat.code)
+                    keyword_map = {
+                        "rail": ["rail", "铁路", "轨道"],
+                        "contactline": ["contactline", "接触网", "catenary", "overhead"],
+                        "bridge": ["bridge", "桥梁"],
+                        "protected_area": ["protected_area", "保护区"],
+                    }
+                    tokens = []
+                    if cat.match_keyword:
+                        tokens.append(cat.match_keyword)
+                    tokens.extend(keyword_map.get(norm_code, []))
+
+                    for token in tokens:
+                        if token and token.lower() in w_name_lower:
+                            matched_category = cat
+                            break
+                    if matched_category:
+                        break
 
                 # 只有匹配成功的才处理
                 if matched_category:
-                    print(f"   ✅ [Match] 航线 '{w_name}' 命中规则: {matched_category.name}")
+                    print(f"   ✅ [Match] 航线 '{w_name_str}' 命中规则: {matched_category.name}")
 
                     # 4. 获取详情拿到 download_url
                     WaylineFingerprintManager.process_single_wayline(
@@ -1878,7 +2598,7 @@ class WaylineFingerprintManager:
                 wayline_id=wayline_id,
                 defaults={
                     "name": wayline_name,
-                    "detect_type": category_obj.code  # 顺便更新下冗余字段
+                    "detect_type": normalize_detect_code(category_obj.code)
                 }
             )
 
@@ -1902,25 +2622,244 @@ class WaylineFingerprintManager:
                 return
 
             uuid_set = set()
+            action_details_list = []
+            
             with zipfile.ZipFile(io.BytesIO(r.content)) as z:
                 kml_files = [n for n in z.namelist() if n.endswith('template.kml')]
                 if kml_files:
                     with z.open(kml_files[0]) as f:
-                        content = f.read().decode('utf-8')
-                        found = re.findall(r'<wpml:actionUUID>(.*?)</wpml:actionUUID>', content)
-                        uuid_set.update(found)
+                        # 使用 ElementTree 解析 XML
+                        try:
+                            import xml.etree.ElementTree as ET
+                            # 定义命名空间
+                            ns = {'wpml': 'http://www.dji.com/wpmz/1.0.0', 'kml': 'http://www.opengis.net/kml/2.2'}
+                            
+                            # 注册命名空间以便 find 查找
+                            # ET.register_namespace('wpml', ns['wpml'])
+                            # ET.register_namespace('', ns['kml'])
+                            
+                            content = f.read()
+                            root = ET.fromstring(content)
+                            print(f"      🗂️ 解析文件: {kml_files[0]}")
+                            print(f"      🧾 KML 内容长度: {len(content)} 字节")
+                            
+                            # 查找所有 Placemark (航点)
+                            # 注意: KML 结构通常是 Document -> Folder -> Placemark
+                            # 使用 XPath 查找所有 Placemark
+                            # 由于 ElementTree 对带命名空间的查找支持有限，这里用比较通用的方式
+                            
+                            # 辅助函数：带命名空间的查找
+                            def find_val(node, tag):
+                                res = node.find(f".//wpml:{tag}", ns)
+                                if res is None: # 尝试不带命名空间的前缀（有时候结构复杂）
+                                     res = node.find(f".//{{http://www.dji.com/wpmz/1.0.0}}{tag}")
+                                return res.text if res is not None else None
 
-            # D. 存入指纹表 (包含 detect_category)
+                            def find_all(node, tag):
+                                return node.findall(f".//wpml:{tag}", ns) or node.findall(f".//{{http://www.dji.com/wpmz/1.0.0}}{tag}")
+                            
+                            def _local(t):
+                                x = t
+                                if '}' in x:
+                                    x = x.split('}', 1)[1]
+                                if ':' in x:
+                                    x = x.split(':', 1)[1]
+                                return x
+                            
+                            def find_local_first(node, name):
+                                for n in node.iter():
+                                    if _local(n.tag) == name:
+                                        return n
+                                return None
+                            
+                            def find_local_all(node, name):
+                                out = []
+                                for n in node.iter():
+                                    if _local(n.tag) == name:
+                                        out.append(n)
+                                return out
+
+                            # 遍历所有 Placemark
+                            # KML 标准中 Placemark 是属于 http://www.opengis.net/kml/2.2
+                            placemarks = root.findall(".//{http://www.opengis.net/kml/2.2}Placemark")
+                            print(f"      📍 Placemark 数量: {len(placemarks)}")
+                            actions_total = 0
+                            
+                            for idx, pm in enumerate(placemarks, 1):
+                                # 1. 提取位置信息
+                                point = pm.find(".//{http://www.opengis.net/kml/2.2}Point") or find_local_first(pm, "Point")
+                                if point is None: continue
+                                
+                                coords_text = point.find(".//{http://www.opengis.net/kml/2.2}coordinates") or find_local_first(point, "coordinates")
+                                if coords_text is None: continue
+                                
+                                # coordinates 格式: lon,lat 或 lon,lat,height
+                                coords = coords_text.text.strip().split(',')
+                                lon = float(coords[0])
+                                lat = float(coords[1])
+                                
+                                # 高度信息 (优先用 wpml:height)
+                                height_node = find_local_first(pm, 'height')
+                                ellipsoid_node = find_local_first(pm, 'ellipsoidHeight')
+                                height_val = height_node.text if height_node is not None else find_val(pm, 'height')
+                                ellipsoid_height = ellipsoid_node.text if ellipsoid_node is not None else find_val(pm, 'ellipsoidHeight')
+                                
+                                # 如果 wpml:height 没找到，尝试从 coordinates 取第3个值
+                                final_height = float(height_val) if height_val else (float(coords[2]) if len(coords) > 2 else 0.0)
+
+                                # 2. 查找该航点下的所有 Action
+                                action_group = pm.find(".//wpml:actionGroup", ns) or pm.find(".//{http://www.dji.com/wpmz/1.0.0}actionGroup") or find_local_first(pm, "actionGroup")
+                                
+                                if action_group:
+                                    actions = find_all(action_group, 'action') or find_local_all(action_group, 'action')
+                                    actions_total += len(actions)
+                                    if len(actions) == 0:
+                                        print(f"      ⚠️ Placemark#{idx} 未找到 action")
+                                    for action in actions:
+                                        actuator_param = action.find(".//wpml:actionActuatorFuncParam", ns) or action.find(".//{http://www.dji.com/wpmz/1.0.0}actionActuatorFuncParam") or find_local_first(action, "actionActuatorFuncParam")
+                                        
+                                        if actuator_param:
+                                            # 提取 UUID
+                                            uuid_node = actuator_param.find("wpml:actionUUID", ns) or actuator_param.find("{http://www.dji.com/wpmz/1.0.0}actionUUID") or find_local_first(actuator_param, "actionUUID")
+                                            if uuid_node is not None and uuid_node.text:
+                                                uuid = uuid_node.text
+                                                uuid_set.add(uuid)
+                                                
+                                                # 提取 Yaw
+                                                yaw_node = actuator_param.find("wpml:gimbalYawRotateAngle", ns) or actuator_param.find("{http://www.dji.com/wpmz/1.0.0}gimbalYawRotateAngle") or find_local_first(actuator_param, "gimbalYawRotateAngle")
+                                                gimbal_yaw = float(yaw_node.text) if yaw_node is not None else 0.0
+                                                
+                                                # 提取 Aircraft Heading (如果有)
+                                                heading_node = actuator_param.find("wpml:aircraftHeading", ns) or actuator_param.find("{http://www.dji.com/wpmz/1.0.0}aircraftHeading") or find_local_first(actuator_param, "aircraftHeading")
+                                                aircraft_heading = float(heading_node.text) if heading_node is not None else 0.0
+
+                                                # 组装详细信息
+                                                detail = {
+                                                    "uuid": uuid,
+                                                    "lat": lat,
+                                                    "lon": lon,
+                                                    "height": final_height,
+                                                    "ellipsoid_height": float(ellipsoid_height) if ellipsoid_height else None,
+                                                    "gimbal_yaw": gimbal_yaw,
+                                                    "aircraft_heading": aircraft_heading
+                                                }
+                                                action_details_list.append(detail)
+                                else:
+                                    print(f"      ⚠️ Placemark#{idx} 未找到 actionGroup")
+                            
+                            print(f"      📊 解析统计: UUID={len(uuid_set)}, Placemark={len(placemarks)}, Actions={actions_total}, 详情={len(action_details_list)}")
+                            
+                            # 如果未在 Placemark 下找到 actionGroup，尝试全局查找并通过索引映射航点
+                            try:
+                                if actions_total == 0:
+                                    # 构建航点坐标索引列表 (0-based)
+                                    coords_list = []
+                                    for pm in placemarks:
+                                        point = pm.find(".//{http://www.opengis.net/kml/2.2}Point")
+                                        coords_text = point.find(".//{http://www.opengis.net/kml/2.2}coordinates") if point is not None else None
+                                        if coords_text is None:
+                                            coords_list.append(None)
+                                            continue
+                                        coords = coords_text.text.strip().split(',')
+                                        lon = float(coords[0]); lat = float(coords[1])
+                                        height_val = find_val(pm, 'height')
+                                        ellipsoid_height = find_val(pm, 'ellipsoidHeight')
+                                        final_height = float(height_val) if height_val else (float(coords[2]) if len(coords) > 2 else 0.0)
+                                        coords_list.append((lat, lon, final_height, float(ellipsoid_height) if ellipsoid_height else None))
+                                    
+                                    global_groups = root.findall(".//wpml:actionGroup", ns) or root.findall(".//{http://www.dji.com/wpmz/1.0.0}actionGroup")
+                                    print(f"      🌐 全局 actionGroup 数量: {len(global_groups)}")
+                                    
+                                    for g_idx, group in enumerate(global_groups, 1):
+                                        start_idx_txt = find_val(group, 'actionGroupStartIndex')
+                                        end_idx_txt = find_val(group, 'actionGroupEndIndex')
+                                        sel_idx = None
+                                        if start_idx_txt and start_idx_txt.isdigit():
+                                            sel_idx = int(start_idx_txt)
+                                        elif end_idx_txt and end_idx_txt.isdigit():
+                                            sel_idx = int(end_idx_txt)
+                                        
+                                        if sel_idx is None or sel_idx < 0 or sel_idx >= len(coords_list):
+                                            print(f"      ⚠️ Group#{g_idx} 无法映射航点索引 (start={start_idx_txt}, end={end_idx_txt})")
+                                        
+                                        actions = find_all(group, 'action')
+                                        if len(actions) == 0:
+                                            # 兼容：有些模板直接把 UUID 放在 actionGroup 里
+                                            uuid_nodes = group.findall(".//wpml:actionUUID", ns) or group.findall(".//{http://www.dji.com/wpmz/1.0.0}actionUUID")
+                                        else:
+                                            uuid_nodes = []
+                                        
+                                        mapped_coords = coords_list[sel_idx] if (sel_idx is not None and 0 <= sel_idx < len(coords_list)) else None
+                                        
+                                        # 1) 遍历标准 action 节点
+                                        for action in actions:
+                                            actuator_param = action.find(".//wpml:actionActuatorFuncParam", ns) or action.find(".//{http://www.dji.com/wpmz/1.0.0}actionActuatorFuncParam")
+                                            if actuator_param is None:
+                                                continue
+                                            uuid_node = actuator_param.find("wpml:actionUUID", ns) or actuator_param.find("{http://www.dji.com/wpmz/1.0.0}actionUUID")
+                                            if uuid_node is None or not uuid_node.text:
+                                                continue
+                                            uuid = uuid_node.text
+                                            uuid_set.add(uuid)
+                                            yaw_node = actuator_param.find("wpml:gimbalYawRotateAngle", ns) or actuator_param.find("{http://www.dji.com/wpmz/1.0.0}gimbalYawRotateAngle")
+                                            gimbal_yaw = float(yaw_node.text) if yaw_node is not None else 0.0
+                                            heading_node = actuator_param.find("wpml:aircraftHeading", ns) or actuator_param.find("{http://www.dji.com/wpmz/1.0.0}aircraftHeading")
+                                            aircraft_heading = float(heading_node.text) if heading_node is not None else 0.0
+                                            
+                                            detail = {
+                                                "uuid": uuid,
+                                                "lat": mapped_coords[0] if mapped_coords else None,
+                                                "lon": mapped_coords[1] if mapped_coords else None,
+                                                "height": mapped_coords[2] if mapped_coords else None,
+                                                "ellipsoid_height": mapped_coords[3] if mapped_coords else None,
+                                                "gimbal_yaw": gimbal_yaw,
+                                                "aircraft_heading": aircraft_heading
+                                            }
+                                            action_details_list.append(detail)
+                                            actions_total += 1
+                                        
+                                        # 2) 兼容遍历直接 UUID 节点
+                                        for uuid_node in uuid_nodes:
+                                            if not uuid_node.text:
+                                                continue
+                                            uuid = uuid_node.text
+                                            uuid_set.add(uuid)
+                                            detail = {
+                                                "uuid": uuid,
+                                                "lat": mapped_coords[0] if mapped_coords else None,
+                                                "lon": mapped_coords[1] if mapped_coords else None,
+                                                "height": mapped_coords[2] if mapped_coords else None,
+                                                "ellipsoid_height": mapped_coords[3] if mapped_coords else None,
+                                                "gimbal_yaw": 0.0,
+                                                "aircraft_heading": 0.0
+                                            }
+                                            action_details_list.append(detail)
+                                            actions_total += 1
+                                    
+                                    print(f"      ✅ 全局解析补充后: UUID={len(uuid_set)}, Actions={actions_total}, 详情={len(action_details_list)}")
+                            except Exception as e:
+                                print(f"      ❌ 全局解析失败: {e}")
+                                                
+                        except Exception as parse_err:
+                            print(f"      ❌ 解析 KML 失败: {parse_err}")
+                            # 降级：如果 XML 解析失败，回退到正则只提取 UUID
+                            content_str = content.decode('utf-8', errors='ignore')
+                            found = re.findall(r'<wpml:actionUUID>(.*?)</wpml:actionUUID>', content_str)
+                            uuid_set.update(found)
+
+            # D. 存入指纹表 (包含 detect_category 和 action_details)
             if uuid_set:
                 fp, _ = WaylineFingerprint.objects.get_or_create(wayline=local_wayline)
-                fp.detect_category = category_obj  # 🔥 关键：把匹配到的类型存进去
+                fp.detect_category = category_obj
                 fp.action_uuids = list(uuid_set)
+                fp.action_details = action_details_list # 🔥 存入详细信息
                 fp.source_url = download_url
                 fp.save()
-                print(f"      💾 指纹入库成功 (包含 {len(uuid_set)} 个 UUID)")
+                print(f"      💾 指纹入库成功 (包含 {len(uuid_set)} 个 UUID, {len(action_details_list)} 条详情)")
 
         except Exception as e:
             print(f"      ❌ 处理单条航线出错: {e}")
+
     @staticmethod
     def identify(image_uuid):
         """根据图片UUID反查航线"""
@@ -1929,3 +2868,179 @@ class WaylineFingerprintManager:
             if image_uuid in fp.action_uuids:
                 return fp.wayline
         return None
+
+
+
+class FlightTaskProxyViewSet(viewsets.ViewSet):
+    """
+    代理 DJI 飞行任务相关的 API 请求
+    通过后端转发，隐藏 settings 中的敏感 Header 信息
+    """
+    
+    @action(detail=False, methods=['get'])
+    def devices(self, request):
+        """获取设备列表 (GET /device)"""
+        try:
+            headers, base_url = WaylineFingerprintManager.get_api_headers_and_host()
+            # 这里的路径取决于司空的真实 API，通常是 /openapi/v0.1/device
+            # 如果需要分页，司空 API 可能需要 page/page_size 参数
+            url = f"{base_url}/openapi/v0.1/device"
+            
+            # 透传前端传来的 query params (比如 page_size)
+            params = request.query_params
+            
+            print(f"📡 [Proxy] Forwarding GET to {url}")
+            resp = requests.get(url, headers=headers, params=params, timeout=10)
+            
+            # 直接返回上游的 JSON
+            return Response(resp.json(), status=resp.status_code)
+        except Exception as e:
+            print(f"❌ [Proxy Error] Fetch devices failed: {e}")
+            return Response({"code": 500, "msg": str(e)}, status=500)
+
+    @action(detail=False, methods=['post'], url_path='create')
+    def create_task(self, request):
+        """创建飞行任务 (POST /flight-task)"""
+        try:
+            headers, base_url = WaylineFingerprintManager.get_api_headers_and_host()
+            url = f"{base_url}/openapi/v0.1/flight-task"
+            
+            print(f"📡 [Proxy] Forwarding POST to {url}")
+            # request.data 已经是解析后的 JSON (dict)
+            resp = requests.post(url, headers=headers, json=request.data, timeout=10)
+            
+            res_json = resp.json()
+            
+            # 如果创建成功，保存到数据库
+            if resp.status_code == 200 and res_json.get('code') == 0:
+                try:
+                    data = res_json.get('data', {})
+                    task_uuid = data.get('task_uuid')
+                    
+                    if task_uuid:
+                        # 提取参数
+                        req_data = request.data
+                        FlightTaskInfo.objects.create(
+                            task_uuid=task_uuid,
+                            name=req_data.get('name', '未命名任务'),
+                            sn=req_data.get('sn'),
+                            wayline_id=req_data.get('wayline_id'),
+                            params=req_data,
+                            status='created'
+                        )
+                        print(f"✅ [DB] Flight task recorded: {task_uuid}")
+                except Exception as db_e:
+                    print(f"⚠️ [DB Error] Failed to record flight task: {db_e}")
+            
+            return Response(res_json, status=resp.status_code)
+        except Exception as e:
+            print(f"❌ [Proxy Error] Create task failed: {e}")
+            return Response({"code": 500, "msg": str(e)}, status=500)
+
+
+
+class DronePositionViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    无人机位置信息视图集
+    提供位置数据查询、筛选和分析功能
+    """
+    queryset = DronePosition.objects.all()
+    serializer_class = DronePositionSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    search_fields = ['device_sn', 'device_model']
+    ordering_fields = ['timestamp', 'created_at', 'altitude', 'battery_percent']
+    ordering = ['-timestamp']  # 默认按时间戳降序
+
+    filterset_fields = {
+        'device_sn': ['exact', 'icontains'],
+        'device_model': ['exact', 'icontains'],
+        'timestamp': ['gte', 'lte', 'range'],
+        'altitude': ['gte', 'lte'],
+        'battery_percent': ['gte', 'lte'],
+    }
+
+    @action(detail=False, methods=['get'])
+    def latest_by_device(self, request):
+        """
+        获取每台设备的最新位置
+        GET /api/drone-positions/latest_by_device/
+        """
+        from django.db.models import Max
+
+        # 获取所有设备的最新时间戳
+        latest_timestamps = DronePosition.objects.values('device_sn').annotate(
+            latest_time=Max('timestamp')
+        )
+
+        # 获取每台设备的最新记录
+        latest_positions = []
+        for item in latest_timestamps:
+            position = DronePosition.objects.filter(
+                device_sn=item['device_sn'],
+                timestamp=item['latest_time']
+            ).first()
+            if position:
+                latest_positions.append(position)
+
+        serializer = self.get_serializer(latest_positions, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def track(self, request):
+        """
+        获取指定设备的飞行轨迹
+        GET /api/drone-positions/track/?device_sn=xxx&start_time=xxx&end_time=xxx
+        """
+        device_sn = request.query_params.get('device_sn')
+        start_time = request.query_params.get('start_time')
+        end_time = request.query_params.get('end_time')
+
+        if not device_sn:
+            return Response(
+                {"error": "必须提供 device_sn 参数"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        queryset = DronePosition.objects.filter(device_sn=device_sn)
+
+        if start_time:
+            queryset = queryset.filter(timestamp__gte=start_time)
+        if end_time:
+            queryset = queryset.filter(timestamp__lte=end_time)
+
+        queryset = queryset.order_by('timestamp')
+        serializer = self.get_serializer(queryset, many=True)
+
+        return Response({
+            "device_sn": device_sn,
+            "count": queryset.count(),
+            "track": serializer.data
+        })
+
+    @action(detail=False, methods=['get'])
+    def statistics(self, request):
+        """
+        获取位置数据统计信息
+        GET /api/drone-positions/statistics/
+        """
+        from django.db.models import Count, Avg, Max, Min
+
+        # 按设备统计
+        device_stats = DronePosition.objects.values('device_sn', 'device_model').annotate(
+            record_count=Count('id'),
+            avg_altitude=Avg('altitude'),
+            max_altitude=Max('altitude'),
+            min_altitude=Min('altitude'),
+            latest_time=Max('timestamp'),
+            earliest_time=Min('timestamp')
+        ).order_by('-record_count')
+
+        total_records = DronePosition.objects.count()
+        total_devices = DronePosition.objects.values('device_sn').distinct().count()
+
+        return Response({
+            "total_records": total_records,
+            "total_devices": total_devices,
+            "device_statistics": list(device_stats)
+        })

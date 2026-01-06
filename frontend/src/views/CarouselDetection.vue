@@ -45,59 +45,108 @@
     
 
     <div class="content-grid">
-      <!-- 左侧：待启动任务列表 -->
+      <!-- 左侧：三级树形结构（检测类型 → 航线 → 历史任务） -->
       <div class="scan-section">
         <div class="scan-compact-card">
           <div class="scan-compact-header">
-            <h3 class="compact-title">待启动任务</h3>
+            <h3 class="compact-title">检测类型管理</h3>
             <div class="scan-actions-compact">
               <button
                 class="compact-btn primary"
-                @click="loadPendingTasks"
-                :disabled="scanLoading"
+                @click="loadHistoryTree"
+                :disabled="treeLoading"
               >
-                {{ scanLoading ? '加载中...' : '刷新' }}
-              </button>
-              <button
-                class="compact-btn success"
-                @click="startSelectedTasks"
-                :disabled="!selectedFolders.length || startLoading"
-              >
-                {{ startLoading ? '启动中...' : `开始 (${selectedFolders.length})` }}
+                {{ treeLoading ? '加载中...' : '刷新' }}
               </button>
             </div>
           </div>
-          <div class="scan-compact-body" v-if="scanError">
-            <div class="error-state-compact">{{ scanError }}</div>
+          <div class="scan-compact-body" v-if="treeError">
+            <div class="error-state-compact">{{ treeError }}</div>
           </div>
-          <div class="scan-compact-body" v-else-if="!candidateGroups.length">
-            <div class="empty-state-compact">点击刷新按钮</div>
+          <div class="scan-compact-body" v-else-if="!detectionTree.length">
+            <div class="empty-state-compact">点击刷新按钮加载历史任务</div>
           </div>
           <div class="scan-compact-body" v-else>
-            <div class="scan-list-compact" v-for="group in candidateGroups" :key="group.date">
-              <div class="date-header-compact">{{ group.date }} ({{ group.tasks.length }})</div>
+            <!-- 第一级：检测类型 -->
+            <div
+              class="location-group"
+              v-for="categoryGroup in detectionTree"
+              :key="categoryGroup.code"
+            >
               <div
-                class="task-item-compact"
-                v-for="item in group.tasks"
-                :key="item.id"
+                class="location-header"
+                @click="toggleCategory(categoryGroup.code)"
               >
-                <label class="checkbox-compact">
-                  <input
-                    type="checkbox"
-                    :value="item.id"
-                    :checked="isFolderSelected(item.id)"
-                    @change="toggleFolderSelection(item.id)"
-                    :disabled="item.detect_status === 'scanning' || item.detect_status === 'processing'"
-                  />
-                  <span class="checkmark"></span>
-                </label>
-                <div class="task-info-compact">
-                  <div class="task-name-compact">{{ item.external_task_id }}</div>
-                  <div class="task-type-compact">{{ item.detect_category_name || '未设置' }}</div>
+                <span class="location-icon">{{ categoryGroup.icon }}</span>
+                <span class="location-name">{{ categoryGroup.name }}</span>
+                <span class="location-count">({{ categoryGroup.taskCount }})</span>
+                <span class="toggle-icon">{{ isCategoryExpanded(categoryGroup.code) ? '▼' : '▶' }}</span>
+              </div>
+
+              <!-- 第二级：航线 -->
+              <div v-show="isCategoryExpanded(categoryGroup.code)">
+                <div
+                  class="type-group"
+                  v-for="waylineGroup in categoryGroup.waylines"
+                  :key="waylineGroup.id"
+                >
+                  <div
+                    class="type-header"
+                    @click="toggleWaylineInTree(categoryGroup.code, waylineGroup.id)"
+                  >
+                    <span class="type-icon">🛤️</span>
+                    <span class="type-name">{{ waylineGroup.name }}</span>
+                    <span class="type-count" :class="{ 'highlight-count': waylineGroup.tasks.length > 0 }">({{ waylineGroup.tasks.length }})</span>
+                    <span class="toggle-icon">{{ isWaylineExpanded(categoryGroup.code, waylineGroup.id) ? '▼' : '▶' }}</span>
+                  </div>
+
+                  <!-- 第三级：历史任务 -->
+                  <div v-show="isWaylineExpanded(categoryGroup.code, waylineGroup.id)">
+                    <div
+                      class="task-item-compact clickable"
+                      v-for="task in waylineGroup.tasks"
+                      :key="task.id"
+                      @click="startInspectPlaybackForFolder(task, true)"
+                      :class="{ active: currentInspectTaskId === task.id }"
+                    >
+                      <div class="task-info-compact">
+                        <div class="task-name-compact">{{ task.dji_task_name || task.external_task_id }}</div>
+                        <div class="task-meta-compact">
+                          <span class="task-time">{{ formatTaskDate(task.created_at) }}</span>
+                          <span class="task-divider">|</span>
+                          <span class="device-sn" v-if="task.device_sn">🚁 {{ task.device_sn }}</span>
+                          <span class="task-divider" v-if="task.device_sn">|</span>
+                          <span class="alarm-count">🚨 {{ task.alarm_count }} 个异常</span>
+                        </div>
+                      </div>
+                      
+                      <!-- 轮播异常按钮 -->
+                      <button 
+                        v-if="task.alarm_count > 0"
+                        class="action-btn-compact"
+                        @click.stop="playTaskAlarms(task)"
+                        title="轮播异常"
+                      >
+                        <span class="btn-icon">▶</span>
+                        <span>轮播异常</span>
+                      </button>
+
+                      <span class="status-compact" :class="`status-${task.detect_status}`">
+                        {{ formatDbStatus(task.detect_status) }}
+                      </span>
+                    </div>
+
+                    <!-- 空状态提示 -->
+                    <div v-if="!waylineGroup.tasks.length" class="empty-tasks-hint">
+                      暂无历史任务
+                    </div>
+                  </div>
                 </div>
-                <span class="status-compact" :class="`status-${item.detect_status}`">
-                  {{ formatDbStatus(item.detect_status) }}
-                </span>
+                
+                <!-- 无航线提示 -->
+                <div v-if="!categoryGroup.waylines.length" class="empty-tasks-hint">
+                  该检测类型暂无航线
+                </div>
               </div>
             </div>
           </div>
@@ -176,12 +225,20 @@
               <h3 class="card-title">实时检测回放</h3>
               <p class="card-subtitle">当前任务：{{ currentInspectTaskName || '未选择' }}</p>
             </div>
+            <div class="legend" v-if="currentInspectTaskId">
+              <span class="legend-dot processing"></span>
+              <span>检测中</span>
+              <span class="legend-dot done"></span>
+              <span>已识别</span>
+              <span class="legend-dot error"></span>
+              <span>异常发现</span>
+            </div>
           </div>
 
-          <div v-if="!currentInspectImage" class="flow-slide empty">
+          <div v-if="!currentInspectImage && !inspectImages.length" class="flow-slide empty">
             <p>等待检测图片产生...</p>
           </div>
-          <div v-else class="flow-slide">
+          <div v-else-if="currentInspectImage" class="flow-slide">
             <div class="slide-top">
               <div class="slide-pill" :class="inspectStatusClass">
                 第{{ inspectIndex + 1 }}张 · {{ inspectStatusText }}
@@ -296,7 +353,7 @@ import alarmApi from '../api/alarmApi'
 import waylineApi from '../api/waylineApi'
 import waylineImageApi from '../api/waylineImageApi'
 import inspectTaskApi from '../api/inspectTaskApi'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElNotification } from 'element-plus'
 
 export default {
   name: 'CarouselDetection',
@@ -306,6 +363,10 @@ export default {
       error: '',
       loadingWaylines: false,
       waylines: [],
+      allWaylines: [],
+      locationTree: [],
+      expandedLocations: new Set(),
+      expandedTypes: new Set(),
       selectedWayline: '',
       flowSlides: [],
       marqueeItems: [],
@@ -343,7 +404,16 @@ export default {
       currentTaskIndex: 0, // 当前回放的任务索引
       allTasksCompleted: false, // 所有任务是否已完成
       scanRefreshTimer: null, // 预扫描列表刷新定时器
-      isDetectMode: false // 是否为检测模式（true=检测，false=回放）
+      isDetectMode: false, // 是否为检测模式（true=检测，false=回放）
+      // 新增：三级树结构
+      detectionTree: [], // 检测类型树
+      treeLoading: false,
+      treeError: '',
+      expandedCategories: new Set(),
+      expandedWaylines: new Set(),
+      selectedHistoryTask: null,
+      latestManualTaskId: null,
+      taskProgressMap: {} // 记录每个任务的播放进度
     }
   },
   computed: {
@@ -392,11 +462,11 @@ export default {
   mounted() {
     this.loadWaylines()
     this.refreshAll()
-    this.loadPendingTasks() // 初始加载待启动任务
-    // 启动静默刷新定时器（5秒一次，只更新数据不显示loading）
+    this.loadHistoryTree() // 初始加载历史任务树
+    // 启动刷新定时器（10秒一次）
     this.scanRefreshTimer = setInterval(() => {
-      this.loadPendingTasks(true) // 传入 true 表示静默刷新
-    }, 5000)
+      this.loadHistoryTree(true) // 静默刷新
+    }, 10000)
     
     // 检查是否有回放参数
     const playbackTaskId = this.$route.query.playback
@@ -422,27 +492,30 @@ export default {
         console.log('⚠️ [Debug] 加载中，跳过重复请求')
         return
       }
-      
+
       // 只有非静默模式才显示 loading 状态
       if (!silent) {
         this.scanLoading = true
       }
       this.scanError = ''
-      
+
       try {
-        console.log('📡 [Debug] 调用 getInspectTasks API 查询 pending 状态的子任务...')
+        console.log('📡 [Debug] 调用 getInspectTasks API 查询待启动任务...')
         const res = await inspectTaskApi.getInspectTasks({
-          detect_status: 'pending',
+          detect_status__in: 'pending,scanning',  // 包含 pending 和 scanning 状态
           parent_task__isnull: false,  // 只查询子任务
           page_size: 100,
           ordering: '-created_at'
         })
         console.log('✅ [Debug] API 响应:', res)
-        
+
         const tasks = this.normalizeList(res)
         console.log('📋 [Debug] 待启动子任务列表:', tasks)
-        
-        // 按日期分组（从 external_task_id 提取日期，格式如 "20251221工业大学桥梁检测"）
+
+        // 将任务匹配到地点树形结构
+        this.matchTasksToTree(tasks)
+
+        // 保留原有的日期分组逻辑（用于兼容）
         const grouped = {}
         tasks.forEach(task => {
           const dateMatch = task.external_task_id?.match(/^(\d{8})/)
@@ -455,7 +528,7 @@ export default {
           }
           grouped[dateKey].tasks.push(task)
         })
-        
+
         this.candidateGroups = Object.values(grouped)
         console.log('📊 [Debug] 分组后的待启动任务:', this.candidateGroups)
       } catch (err) {
@@ -483,14 +556,64 @@ export default {
       return this.selectedFolders.includes(taskId)
     },
 
-    async startInspectPlaybackForFolder(folderName, isPlaybackMode = false) {
+    async startInspectPlaybackForFolder(taskOrId, isPlaybackMode = false) {
+      // 保存当前任务进度
+      if (this.currentInspectTaskId) {
+        this.taskProgressMap[this.currentInspectTaskId] = this.inspectIndex
+      }
+
       try {
-        const params = { page_size: 20, search: folderName }
-        const res = await inspectTaskApi.getInspectTasks(params)
-        const list = this.normalizeList(res)
-        const task = list.find(item => item.external_task_id === folderName) || list[0]
+        // 🔥 [Fix] 增强参数解析：如果是 JSON 字符串，先解析为对象
+        if (typeof taskOrId === 'string' && (taskOrId.startsWith('{') || taskOrId.startsWith('%7B'))) {
+           try {
+              const decoded = decodeURIComponent(taskOrId)
+              if (decoded.startsWith('{')) {
+                 const parsed = JSON.parse(decoded)
+                 if (parsed && (parsed.id || parsed.external_task_id)) {
+                    taskOrId = parsed
+                    console.log('🔄 [Auto-Fix] 成功将 JSON 字符串参数解析为对象')
+                 }
+              }
+           } catch (e) {
+              console.warn('解析 JSON 参数失败:', e)
+           }
+        }
+
+        let task = null
+        let folderName = ''
+
+        // 1. 判断传入的是对象还是ID字符串
+        if (typeof taskOrId === 'object' && taskOrId !== null) {
+          task = taskOrId
+          folderName = task.external_task_id
+          console.log('🎯 [Direct] 直接使用传入的任务对象:', folderName)
+        } else {
+          folderName = taskOrId
+          
+          // 🔥 [Fix] 防止将 JSON 串或非法字符发给后端
+          if (typeof folderName === 'string' && (folderName.includes('{') || folderName.includes('}'))) {
+             console.error('❌ [Error] 参数疑似 JSON 但解析失败，拒绝发送搜索请求:', folderName)
+             ElMessage.error('参数格式错误，无法启动任务')
+             return
+          }
+
+          console.log('🔍 [Search] 通过ID查找任务:', folderName)
+          const params = { page_size: 20, search: folderName }
+          const res = await inspectTaskApi.getInspectTasks(params)
+          const list = this.normalizeList(res)
+          console.log(`🔍 [Search Result] 搜索 "${folderName}" 返回结果数: ${list.length}`)
+          
+          // 优先完全匹配
+          task = list.find(item => item.external_task_id === folderName) || list[0]
+          
+          if (!task && list.length === 0) {
+             console.warn(`⚠️ [Search Warning] 搜索 "${folderName}" 未返回任何结果！API Params:`, params)
+          }
+        }
+
         if (!task) {
-          ElMessage.error('未找到对应的巡检任务')
+          console.error(`❌ [Error] 无法找到任务: ${folderName}`)
+          ElMessage.error(`未找到对应的巡检任务: ${folderName}`)
           return
         }
         console.log('🔍 选中的任务数据:', task)
@@ -542,6 +665,17 @@ export default {
         this.inspectPausedOnAnomaly = false
         this.startInspectTimers()
         await this.pollInspectImages()
+
+        // 恢复任务进度
+        if (this.taskProgressMap[this.currentInspectTaskId] !== undefined) {
+          const savedIndex = this.taskProgressMap[this.currentInspectTaskId]
+          if (this.inspectImages.length > 0) {
+            this.inspectIndex = Math.min(savedIndex, this.inspectImages.length - 1)
+          }
+        } else if (task.detect_status === 'scanning' && this.inspectImages.length > 0) {
+          // 实时任务自动跳至最新
+          this.inspectIndex = this.inspectImages.length - 1
+        }
       } catch (err) {
         console.error('选择巡检任务进行回放失败:', err)
         ElMessage.error('选择巡检任务失败')
@@ -565,19 +699,19 @@ export default {
         
         ElMessage.success(`已启动 ${this.selectedFolders.length} 个检测任务`)
         
-        // 获取任务名称用于回放
-        const taskNames = []
+        // 获取任务对象用于回放
+        const tasks = []
         for (const taskId of this.selectedFolders) {
           const taskData = this.candidateGroups
             .flatMap(g => g.tasks)
             .find(t => t.id === taskId)
           if (taskData) {
-            taskNames.push(taskData.external_task_id)
+            tasks.push(taskData)
           }
         }
         
-        // 保存任务队列用于顺序回放
-        this.taskQueue = taskNames
+        // 保存任务队列用于顺序回放 (存对象，避免后续搜索失败)
+        this.taskQueue = tasks
         this.currentTaskIndex = 0
         this.selectedFolders = []
         this.isDetectMode = true // 标记为检测模式
@@ -614,8 +748,17 @@ export default {
     async loadWaylines() {
       this.loadingWaylines = true
       try {
-        const res = await waylineApi.getWaylines({ page_size: 200 })
+        // 后端已禁用分页，不需要传 page_size
+        const res = await waylineApi.getWaylines({})
         const list = this.normalizeList(res)
+
+        console.log('📊 API返回航线数量:', list.length)
+        console.log('📊 所有航线ID:', list.map(w => w.id).sort((a, b) => a - b))
+
+        // 保存所有航线数据
+        this.allWaylines = list
+
+        // 构建原有的 waylines 数组（用于筛选）
         this.waylines = list
           .map(item => {
             const optionValue = item.wayline_id ?? item.id
@@ -626,9 +769,13 @@ export default {
             }
           })
           .filter(Boolean)
+
+        // 构建地点树形结构
+        this.buildLocationTree()
       } catch (err) {
         console.warn('加载航线列表失败，使用空列表', err)
         this.waylines = []
+        this.allWaylines = []
       } finally {
         this.loadingWaylines = false
       }
@@ -792,10 +939,12 @@ export default {
         console.log('⚠️ 任务队列已空')
         return
       }
-      const folderName = this.taskQueue[this.currentTaskIndex]
-      console.log(`🎬 开始回放任务: ${folderName} (第 ${this.currentTaskIndex + 1}/${this.taskQueue.length} 个)`)
+      const taskOrName = this.taskQueue[this.currentTaskIndex]
+      const name = taskOrName.external_task_id || taskOrName
+      
+      console.log(`🎬 开始回放任务: ${name} (第 ${this.currentTaskIndex + 1}/${this.taskQueue.length} 个)`)
       this.allTasksCompleted = false // 重置完成标志
-      await this.startInspectPlaybackForFolder(folderName)
+      await this.startInspectPlaybackForFolder(taskOrName)
     },
     handleWaylineChange() {
       this.activeIndex = 0
@@ -946,6 +1095,610 @@ export default {
         console.error('解析result_info失败:', err)
         return ''
       }
+    },
+
+    // ==================== 地点树形结构相关方法 ====================
+
+    // 构建地点树形结构
+    buildLocationTree() {
+      const locationMap = new Map()
+
+      // 定义固定的检测类型
+      const fixedTypes = [
+        { typeName: '铁路检测', typeKey: 'rail', icon: '🛤️' },
+        { typeName: '接触网检测', typeKey: 'contactline', icon: '⚡' },
+        { typeName: '桥梁检测', typeKey: 'bridge', icon: '🌉' },
+        { typeName: '保护区检测', typeKey: 'protected_area', icon: '🛡️' }
+      ]
+
+      // 🔍 调试：打印所有航线名称
+      console.log('🔍 所有航线数据:', this.allWaylines.map(w => ({ id: w.id, name: w.name })))
+
+      // 遍历所有航线，提取地点和检测类型
+      this.allWaylines.forEach(wayline => {
+        console.log(`🔍 解析航线: "${wayline.name}"`)
+
+        const locationInfo = this.parseWaylineName(wayline.name)
+        console.log(`  → 解析结果:`, locationInfo)
+
+        if (!locationMap.has(locationInfo.location)) {
+          locationMap.set(locationInfo.location, {
+            location: locationInfo.location,
+            types: new Map()
+          })
+        }
+
+        const locationData = locationMap.get(locationInfo.location)
+        if (!locationData.types.has(locationInfo.typeKey)) {
+          locationData.types.set(locationInfo.typeKey, {
+            typeName: locationInfo.typeName,
+            typeKey: locationInfo.typeKey,
+            icon: locationInfo.icon,
+            waylines: [],
+            tasks: []
+          })
+        }
+
+        locationData.types.get(locationInfo.typeKey).waylines.push(wayline)
+      })
+
+      // 转换为数组格式，并确保每个地点都有三种检测类型
+      this.locationTree = Array.from(locationMap.values()).map(loc => {
+        const existingTypes = loc.types
+
+        // 创建三种固定类型，如果已存在则使用现有的，否则创建空的
+        const types = fixedTypes.map(fixedType => {
+          if (existingTypes.has(fixedType.typeKey)) {
+            return existingTypes.get(fixedType.typeKey)
+          } else {
+            return {
+              typeName: fixedType.typeName,
+              typeKey: fixedType.typeKey,
+              icon: fixedType.icon,
+              waylines: [],
+              tasks: []
+            }
+          }
+        })
+
+        return {
+          location: loc.location,
+          types: types
+        }
+      })
+
+      console.log('📍 地点树结构:', this.locationTree)
+      console.log('📍 地点列表:', this.locationTree.map(loc => loc.location))
+    },
+
+    // 解析航线名称，提取地点和检测类型
+    parseWaylineName(name) {
+      if (!name) return {
+        location: '其他地点',
+        typeName: '铁路检测',
+        typeKey: 'rail',
+        icon: '🛤️'
+      }
+
+      // 先去掉后缀
+      let cleanName = name.replace(/-拼接航线$/, '')
+
+      // 映射到完整类型名和英文key
+      const typeMap = {
+        '铁路': { name: '铁路检测', key: 'rail', icon: '🛤️' },
+        '轨道': { name: '铁路检测', key: 'rail', icon: '🛤️' },
+        '桥梁': { name: '桥梁检测', key: 'bridge', icon: '🌉' },
+        '接触网': { name: '接触网检测', key: 'contactline', icon: '⚡' },
+        '保护区': { name: '保护区检测', key: 'protected_area', icon: '🛡️' }
+      }
+
+      // 格式1: 工业大学左侧轨道 (标准格式)
+      let match = cleanName.match(/^(.+)(左侧|右侧)(轨道|铁路|桥梁|接触网|保护区)$/)
+
+      if (match) {
+        const location = match[1]
+        const side = match[2]
+        const detectType = match[3]
+        const typeInfo = typeMap[detectType] || typeMap['轨道']
+
+        return {
+          location: location,
+          typeName: typeInfo.name,
+          typeKey: typeInfo.key,
+          icon: typeInfo.icon,
+          side: side
+        }
+      }
+
+      // 格式2: 宁官至余量良桥梁左侧 (地点+类型+侧别，顺序相反)
+      match = cleanName.match(/^(.+)(轨道|铁路|桥梁|接触网|保护区)(左侧|右侧)$/)
+
+      if (match) {
+        const location = match[1]
+        const detectType = match[2]
+        const side = match[3]
+        const typeInfo = typeMap[detectType] || typeMap['轨道']
+
+        return {
+          location: location,
+          typeName: typeInfo.name,
+          typeKey: typeInfo.key,
+          icon: typeInfo.icon,
+          side: side
+        }
+      }
+
+      // 格式3: 余良至地下轨道 (没有侧别)
+      match = cleanName.match(/^(.+)(轨道|铁路|桥梁|接触网|保护区)$/)
+
+      if (match) {
+        const location = match[1]
+        const detectType = match[2]
+        const typeInfo = typeMap[detectType] || typeMap['轨道']
+
+        return {
+          location: location,
+          typeName: typeInfo.name,
+          typeKey: typeInfo.key,
+          icon: typeInfo.icon,
+          side: ''
+        }
+      }
+
+      // 格式4: 包含检测关键字的模糊匹配
+      for (const [keyword, typeInfo] of Object.entries(typeMap)) {
+        if (cleanName.includes(keyword)) {
+          let location = cleanName.replace(keyword, '').replace(/^[左右]侧/, '').replace(/^[左右]侧$/, '')
+          location = location.replace(/-/g, '')
+          return {
+            location: location || cleanName,
+            typeName: typeInfo.name,
+            typeKey: typeInfo.key,
+            icon: typeInfo.icon,
+            side: ''
+          }
+        }
+      }
+
+      // 默认返回（归入轨道检测）
+      return {
+        location: cleanName,
+        typeName: '铁路检测',
+        typeKey: 'rail',
+        icon: '🛤️'
+      }
+    },
+
+    // 将任务匹配到树形结构
+    matchTasksToTree(tasks) {
+      // 先清空所有任务
+      this.locationTree.forEach(loc => {
+        loc.types.forEach(type => {
+          type.tasks = []
+        })
+      })
+
+      // 匹配任务到对应位置
+      tasks.forEach(task => {
+        if (!task.wayline) return
+
+        // 获取任务对应的航线
+        const wayline = this.allWaylines.find(w => w.id === task.wayline)
+        if (!wayline) return
+
+        // 解析航线名称
+        const locationInfo = this.parseWaylineName(wayline.name)
+
+        // 找到对应的地点和类型
+        const location = this.locationTree.find(loc => loc.location === locationInfo.location)
+        if (!location) return
+
+        const type = location.types.find(t => t.typeKey === locationInfo.typeKey)
+        if (!type) return
+
+        // 添加任务
+        type.tasks.push(task)
+      })
+
+      console.log('🌳 匹配任务后的树结构:', this.locationTree)
+    },
+
+    // 展开/折叠地点
+    toggleLocation(location) {
+      if (this.expandedLocations.has(location)) {
+        this.expandedLocations.delete(location)
+      } else {
+        this.expandedLocations.add(location)
+      }
+    },
+
+    isLocationExpanded(location) {
+      return this.expandedLocations.has(location)
+    },
+
+    // 展开/折叠检测类型
+    toggleType(location, typeKey) {
+      const key = `${location}|${typeKey}`
+      if (this.expandedTypes.has(key)) {
+        this.expandedTypes.delete(key)
+      } else {
+        this.expandedTypes.add(key)
+      }
+    },
+
+    isTypeExpanded(location, typeKey) {
+      const key = `${location}|${typeKey}`
+      return this.expandedTypes.has(key)
+    },
+
+    // 获取地点下所有任务数量
+    getTotalTasksCount(locGroup) {
+      return locGroup.types.reduce((sum, type) => sum + type.tasks.length, 0)
+    },
+
+    // 获取任务的侧别（左侧/右侧）
+    getTaskSide(task) {
+      const wayline = this.allWaylines.find(w => w.id === task.wayline)
+      if (wayline) {
+        const match = wayline.name.match(/(左侧|右侧)/)
+        return match ? match[1] : ''
+      }
+      return ''
+    },
+
+    // 格式化任务时间
+    formatTaskTime(task) {
+      const match = task.external_task_id?.match(/^(\d{8})/)
+      return match ? match[1] : ''
+    },
+
+    // 检查任务是否被选中
+    isTaskSelected(taskId) {
+      return this.selectedFolders.includes(taskId)
+    },
+
+    // ==================== 新增：三级树结构方法 ====================
+
+    // 加载历史任务树
+    async loadHistoryTree(silent = false) {
+      if (this.treeLoading) return
+      if (!silent) this.treeLoading = true
+      this.treeError = ''
+
+      try {
+        // 1. 获取所有检测类型
+        // 🔥 移除 .slice(0, 4) 限制，显示所有配置的检测类型
+        const categoryRes = await alarmApi.getAlarmCategories({ page_size: 100 })
+        const categories = this.normalizeList(categoryRes)
+
+        // 图标映射
+        const iconMap = {
+          'rail': '🛤️',
+          'contactline': '⚡',
+          'bridge': '🌉',
+          'protected_area': '🛡️',
+          'catenary': '⚡',
+          'overhead': '⚡',
+          'insulator': '⚡',
+          'pole': '⚡',
+          'protection_zone': '🛡️'
+        }
+
+        // 2. 构建树结构
+        const tree = []
+        for (const category of categories) {
+          const categoryNode = {
+            code: category.code,
+            name: category.name,
+            icon: iconMap[category.code] || '🔍',
+            taskCount: 0,
+            waylines: []
+          }
+
+          // 🔥 3. 混合模式：确保第二级是“航线”
+          // 策略：
+          // A. 先获取该分类绑定的所有航线 (作为骨架)
+          // B. 再获取该分类下的所有任务 (填充内容)
+          // C. 如果有任务但不属于 A 中的航线，也需要补全 (防止漏掉数据)
+
+          // Step A: 获取航线骨架 (减少 N+1，但保证结构正确)
+          const waylineRes = await waylineApi.getWaylines({
+             detect_type: category.code, 
+             page_size: 100
+          })
+          const waylines = this.normalizeList(waylineRes)
+          
+          const waylineMap = new Map()
+          
+          // 初始化骨架 (即时没有任务，也会显示航线节点，状态为 0 任务)
+          for (const w of waylines) {
+             waylineMap.set(w.id, {
+                id: w.id,
+                name: w.name,
+                tasks: [] // 初始为空
+             })
+          }
+
+          // Step B: 获取任务数据 (批量获取，高效)
+          const taskRes = await inspectTaskApi.getInspectTasks({
+            detect_category: String(category.id),
+            parent_task__isnull: 'false',
+            page_size: 500,
+            ordering: '-created_at'
+          })
+          const allTasks = this.normalizeList(taskRes)
+          
+          console.log(`📍 检测类型 ${category.name} 的任务总数:`, allTasks.length)
+
+          // Step C: 将任务填入航线槽位
+          let unboundCount = 0
+          for (const task of allTasks) {
+            if (task.parent_task === null) continue
+            // 跳过没有关联航线的任务
+            if (!task.wayline) {
+              unboundCount += 1
+              continue
+            }
+            
+            const wId = task.wayline
+            const wName = (task.wayline_details && task.wayline_details.name) 
+              ? task.wayline_details.name 
+              : (typeof task.external_task_id === 'string' ? task.external_task_id.replace(/^\d{8}/, '') || `未知航线-${wId}` : `未知航线-${wId}`)
+
+            // 如果这个航线不在骨架里 (可能是历史数据，或者 detect_type 没对上)，自动补全
+            if (!waylineMap.has(wId)) {
+              waylineMap.set(wId, {
+                id: wId,
+                name: wName,
+                tasks: []
+              })
+            }
+            
+            const alarmCount = task.alarm_count || 0 
+            
+            waylineMap.get(wId).tasks.push({
+              ...task,
+              alarm_count: alarmCount
+            })
+          }
+
+          // 5. 转换为数组结构 (显示所有航线，包括无任务的)
+          for (const wData of waylineMap.values()) {
+             // 策略调整：显示所有关联航线，即便是空航线
+             categoryNode.waylines.push(wData)
+             categoryNode.taskCount += wData.tasks.length
+          }
+          
+          // 6. 统计未绑定航线的任务，不展示分组
+          if (unboundCount > 0) {
+            categoryNode.taskCount += unboundCount
+          }
+
+          // 🔥 排序：将有任务的航线置顶
+          categoryNode.waylines.sort((a, b) => {
+             const countA = a.tasks ? a.tasks.length : 0
+             const countB = b.tasks ? b.tasks.length : 0
+             // 有任务的排前面
+             if (countA > 0 && countB === 0) return -1
+             if (countA === 0 && countB > 0) return 1
+             // 都有任务或都没有任务，保持原序 (或者按名称排，这里保持原序比较稳妥)
+             return 0
+          })
+
+          tree.push(categoryNode)
+        }
+
+        // ==========================================
+        // 🔥 新增：处理未分类/手动上传的任务
+        // ==========================================
+        try {
+          const uncategorizedTasksRes = await inspectTaskApi.getInspectTasks({
+             detect_category__isnull: 'true',
+             page_size: 100,
+             ordering: '-created_at'
+          })
+          let uncategorizedTasks = this.normalizeList(uncategorizedTasksRes)
+          
+          // 🔥 过滤掉父任务 (parent_task 为 null 的容器任务)
+          // 只保留真正的子任务（这些子任务确实没匹配到分类）
+          // 避免在界面上显示重复的父任务节点
+          uncategorizedTasks = uncategorizedTasks.filter(t => t.parent_task !== null)
+
+          if (uncategorizedTasks.length > 0) {
+             const uncatNode = {
+               code: 'uncategorized',
+               name: '未分类/手动上传',
+               icon: '📁',
+               taskCount: uncategorizedTasks.length,
+               waylines: []
+             }
+             
+             // 虚拟航线分组
+             const uncatWayline = {
+               id: 'manual',
+               name: '手动上传文件夹',
+               tasks: uncategorizedTasks.map(t => ({
+                  ...t,
+                  alarm_count: t.alarm_count || 0
+               }))
+             }
+             
+             uncatNode.waylines.push(uncatWayline)
+             tree.push(uncatNode)
+          }
+        } catch (e) {
+          console.warn('获取未分类任务失败:', e)
+        }
+
+        this.detectionTree = tree
+        console.log('✅ 历史任务树加载完成:', tree)
+
+        // ==========================================
+        // 🔥 全局自动播放逻辑 (Global Auto-Play)
+        // ==========================================
+        // 遍历整个树，寻找最新创建的任务 (ID最大的)
+        let newestGlobalTask = null
+
+        // 1. 遍历所有分类节点 (包括未分类)
+        for (const node of tree) {
+          if (!node.waylines) continue
+          
+          for (const wayline of node.waylines) {
+             if (!wayline.tasks) continue
+             
+             for (const task of wayline.tasks) {
+                if (!newestGlobalTask) {
+                   newestGlobalTask = task
+                } else {
+                   // 比较 ID 或 created_at
+                   if (task.id > newestGlobalTask.id) {
+                      newestGlobalTask = task
+                   }
+                }
+             }
+          }
+        }
+
+        if (newestGlobalTask) {
+           // 检查是否是新出现的任务
+           const isNewTask = newestGlobalTask.id !== this.latestManualTaskId
+           // 如果是首次加载（没有记录过ID），我们只记录不自动播放（避免一进页面就乱跳）
+           // 除非用户明确处于空闲状态且没有选定任务
+           const isFirstLoad = !this.latestManualTaskId
+
+           if (isFirstLoad || isNewTask) {
+              // 更新记录
+              this.latestManualTaskId = newestGlobalTask.id
+
+              if (isNewTask && !isFirstLoad) {
+                 console.log(`✨ [Auto] 发现新任务 (ID: ${newestGlobalTask.id}):`, newestGlobalTask.external_task_id)
+                 
+                 // 1. 自动展开对应的菜单
+                 // 找到这个任务归属的 categoryCode 和 waylineId
+                 // 由于我们这里只有 task 对象，需要反向查找或者在遍历时记录
+                 // 简单做法：直接把所有相关层级展开（略显粗暴但有效），或者根据 task 信息推断
+                 
+                 // 尝试从 task 信息中获取分类
+                 let targetCategoryCode = null
+                 if (newestGlobalTask.detect_category_code) {
+                    targetCategoryCode = newestGlobalTask.detect_category_code
+                 } else if (newestGlobalTask.detect_category === null) {
+                    targetCategoryCode = 'uncategorized'
+                 } else {
+                    // 遍历树查找归属
+                    for (const n of tree) {
+                       const found = n.waylines?.some(w => w.tasks?.some(t => t.id === newestGlobalTask.id))
+                       if (found) {
+                          targetCategoryCode = n.code
+                          break
+                       }
+                    }
+                 }
+
+                 if (targetCategoryCode) {
+                     this.expandedCategories.add(targetCategoryCode)
+                  }
+ 
+                  // 2. 弹窗提示 (更显眼)
+                  ElNotification({
+                     title: '新任务自动启动',
+                     message: `检测到任务 ID: ${newestGlobalTask.id} (${newestGlobalTask.external_task_id})，正在自动切换至可视化界面...`,
+                     type: 'success',
+                     duration: 5000,
+                     position: 'top-right'
+                  })
+ 
+                  // 3. 强制自动播放 (无需点击，且抢占当前播放)
+                  console.log('▶️ [Auto] 强制切换到新任务')
+                  this.startInspectPlaybackForFolder(newestGlobalTask, true)
+               }
+            }
+         }
+      } catch (err) {
+        console.error('❌ 加载历史任务树失败:', err)
+        if (!silent) this.treeError = '加载失败，请稍后重试'
+      } finally {
+        if (!silent) this.treeLoading = false
+      }
+    },
+
+    // 展开/折叠检测类型
+    toggleCategory(code) {
+      if (this.expandedCategories.has(code)) {
+        this.expandedCategories.delete(code)
+      } else {
+        this.expandedCategories.add(code)
+      }
+    },
+
+    isCategoryExpanded(code) {
+      return this.expandedCategories.has(code)
+    },
+
+    // 展开/折叠航线
+    toggleWaylineInTree(categoryCode, waylineId) {
+      const key = `${categoryCode}-${waylineId}`
+      if (this.expandedWaylines.has(key)) {
+        this.expandedWaylines.delete(key)
+      } else {
+        this.expandedWaylines.add(key)
+      }
+    },
+
+    isWaylineExpanded(categoryCode, waylineId) {
+      const key = `${categoryCode}-${waylineId}`
+      return this.expandedWaylines.has(key)
+    },
+
+    // 回放任务的告警
+    async playTaskAlarms(task) {
+      this.selectedHistoryTask = task
+      this.currentInspectTaskId = null // 确保切换回轮播模式
+      console.log('🎬 开始回放任务告警:', task.external_task_id)
+
+      try {
+        // 获取该任务的所有告警
+        const res = await alarmApi.getAlarms({
+          source_task: task.id,
+          page_size: 100,
+          ordering: 'created_at'
+        })
+        const alarms = this.normalizeList(res)
+        
+        if (!alarms.length) {
+          ElMessage.warning('该任务暂无异常记录')
+          return
+        }
+
+        // 构建轮播数据
+        this.flowSlides = alarms.map((alarm, idx) => ({
+          ...alarm,
+          key: `${alarm.id || idx}-${idx}`,
+          state: 'abnormal',
+          stateText: '异常',
+          hint: alarm.content || '检测到异常',
+          // 🔥 修复：优先使用 signed_url，否则图片无法加载
+          image_url: alarm.image_signed_url || alarm.image_url
+        }))
+
+        this.activeIndex = 0
+        this.stopAuto()
+        this.startAuto()
+
+        ElMessage.success(`开始回放：${task.external_task_id}（${alarms.length}个异常）`)
+      } catch (err) {
+        console.error('❌ 加载任务告警失败:', err)
+        ElMessage.error('加载任务告警失败')
+      }
+    },
+
+    // 格式化任务日期
+    formatTaskDate(dateStr) {
+      if (!dateStr) return '--'
+      const dt = new Date(dateStr)
+      if (isNaN(dt.getTime())) return '--'
+      const pad = num => String(num).padStart(2, '0')
+      return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`
     }
   }
 }
@@ -1448,6 +2201,30 @@ export default {
   min-width: 0;
 }
 
+.action-btn-compact {
+  background: rgba(14, 165, 233, 0.2);
+  border: 1px solid rgba(14, 165, 233, 0.4);
+  color: #38bdf8;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+  margin-right: 8px;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.action-btn-compact:hover {
+  background: rgba(14, 165, 233, 0.4);
+  transform: scale(1.05);
+}
+
+.action-btn-compact .btn-icon {
+  font-size: 10px;
+}
+
 .task-name-compact {
   font-size: 13px;
   font-weight: 600;
@@ -1488,6 +2265,148 @@ export default {
   color: #86efac;
   border: 1px solid rgba(34, 197, 94, 0.3);
 }
+
+/* ==================== 地点树形结构样式 ==================== */
+
+/* 地点组 */
+.location-group {
+  margin-bottom: 16px;
+  background: rgba(15, 23, 42, 0.4);
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(14, 165, 233, 0.2);
+}
+
+.location-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.15), rgba(6, 182, 212, 0.1));
+  border-bottom: 1px solid rgba(14, 165, 233, 0.2);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  user-select: none;
+}
+
+.location-header:hover {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(6, 182, 212, 0.15));
+}
+
+.location-icon {
+  font-size: 16px;
+}
+
+.location-name {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 700;
+  color: #7dd3fc;
+}
+
+.location-count {
+  font-size: 12px;
+  color: #94a3b8;
+  padding: 2px 8px;
+  background: rgba(14, 165, 233, 0.15);
+  border-radius: 10px;
+}
+
+.toggle-icon {
+  font-size: 10px;
+  color: #64748b;
+  transition: transform 0.3s ease;
+}
+
+/* 检测类型组 */
+.type-group {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.type-group:last-child {
+  border-bottom: none;
+}
+
+.type-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 10px 30px;
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.type-header:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.type-icon {
+  font-size: 14px;
+}
+
+.type-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.type-count {
+  font-size: 11px;
+  color: #64748b;
+  padding: 2px 6px;
+  background: rgba(148, 163, 184, 0.15);
+  border-radius: 8px;
+}
+
+.type-count.highlight-count {
+  color: #38bdf8;
+  background: rgba(14, 165, 233, 0.25);
+  border: 1px solid rgba(14, 165, 233, 0.5);
+  font-weight: 700;
+  box-shadow: 0 0 10px rgba(14, 165, 233, 0.2);
+}
+
+/* 任务元信息 */
+.task-meta-compact {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.task-side {
+  font-size: 11px;
+  color: #06b6d4;
+  padding: 1px 6px;
+  background: rgba(6, 182, 212, 0.15);
+  border-radius: 4px;
+}
+
+.task-divider {
+  color: #475569;
+  font-size: 10px;
+}
+
+.task-time {
+  font-size: 11px;
+  color: #64748b;
+  font-family: 'Courier New', monospace;
+}
+
+/* 空任务提示 */
+.empty-tasks-hint {
+  padding: 20px;
+  text-align: center;
+  color: #64748b;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.01);
+  margin: 0 12px 12px 12px;
+  border-radius: 8px;
+}
+
 
 /* 右侧轮播区域 */
 .carousel-section {
@@ -2077,6 +2996,27 @@ export default {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* 新增：三级树结构样式 */
+.task-item-compact.clickable {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.task-item-compact.clickable:hover {
+  background: rgba(99, 102, 241, 0.1);
+  transform: translateX(4px);
+}
+
+.task-item-compact.active {
+  background: rgba(99, 102, 241, 0.15);
+  border-left: 3px solid #6366f1;
+}
+
+.alarm-count {
+  color: #ef4444;
+  font-weight: 600;
 }
 
 @media (max-width: 1220px) {

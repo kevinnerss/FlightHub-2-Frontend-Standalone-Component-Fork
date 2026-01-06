@@ -1,6 +1,6 @@
 # telemetry_app/management/commands/start_poller.py
 from django.core.management.base import BaseCommand
-from telemetry_app.views import minio_poller_worker  # 引入你写好的逻辑
+from telemetry_app.views import minio_poller_worker2  # 引入最终适配版逻辑
 
 
 class Command(BaseCommand):
@@ -9,6 +9,5 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         self.stdout.write(self.style.SUCCESS('🕵️ [Poller] 独立扫描进程启动中...'))
 
-        # 直接调用你的死循环函数
-        # 注意：这里不需要 threading，因为这个进程就是专门干这件事的
-        minio_poller_worker()
+        # 使用支持指纹识别和三级树结构的 worker
+        minio_poller_worker2()

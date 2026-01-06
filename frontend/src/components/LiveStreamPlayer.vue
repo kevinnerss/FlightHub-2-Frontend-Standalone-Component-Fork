@@ -13,9 +13,8 @@
         </span>
       </div>
       <div class="header-right">
-        <!-- 检测控制按钮 -->
-        <button 
-          @click="toggleMonitor" 
+        <button
+          @click="toggleMonitor"
           class="monitor-control-btn"
           :class="{ 'active': isMonitoring, 'loading': monitorLoading }"
           :disabled="monitorLoading"
@@ -28,7 +27,7 @@
           <div v-else class="mini-spinner"></div>
           <span>{{ isMonitoring ? '停止检测' : '开始检测' }}</span>
         </button>
-        
+
         <button @click="togglePlay" class="control-icon-btn" :title="isPlaying ? '暂停' : '播放'">
           <svg v-if="!isPlaying" viewBox="0 0 24 24" fill="currentColor">
             <path d="M8 5v14l11-7z"/>
@@ -54,8 +53,7 @@
     </div>
 
     <div ref="playerContainer" class="player-container" :class="{ 'loading': loading, 'error': hasError }">
-      <!-- 视频元素 -->
-      <video 
+      <video
         ref="videoElement"
         class="video-element"
         :muted="isMuted"
@@ -68,20 +66,17 @@
         @waiting="onWaiting"
       ></video>
 
-      <!-- 加载中 -->
       <div v-if="loading" class="overlay loading-overlay">
         <div class="loading-spinner"></div>
-        <p>正在连接直播流...</p>
+        <p>正在连接 FMP4 直播流...</p>
       </div>
 
-      <!-- 错误提示 -->
       <div v-if="hasError" class="overlay error-overlay">
         <div class="error-icon">⚠️</div>
         <p class="error-message">{{ errorMessage }}</p>
         <button @click="reload" class="reload-btn">重新加载</button>
       </div>
 
-      <!-- 无流提示 -->
       <div v-if="!streamUrl && !loading && !hasError" class="overlay placeholder-overlay">
         <div class="placeholder-icon">📹</div>
         <p>等待直播流推送...</p>
@@ -109,10 +104,10 @@ import liveMonitorApi from '../api/liveMonitorApi'
 export default {
   name: 'LiveStreamPlayer',
   props: {
-    // 流ID (例如: drone01, protection_zone_01)
+    // 流ID (例如: drone03, protection_zone_01)
     streamId: {
       type: String,
-      default: 'drone01'
+      default: 'drone03'
     },
     // 流名称显示
     streamName: {
@@ -124,7 +119,7 @@ export default {
       type: Boolean,
       default: true
     },
-    // ZLM服务器地址（从配置中心获取或使用默认值）
+    // ZLM服务器地址
     zlmServer: {
       type: String,
       default: 'http://192.168.10.10'
@@ -132,13 +127,11 @@ export default {
   },
   data() {
     return {
-      player: null,
       isPlaying: false,
       isMuted: false,
       loading: false,
       hasError: false,
       errorMessage: '',
-      flvjs: null,
       // 监听状态
       isMonitoring: false,
       monitorLoading: false,
@@ -146,15 +139,20 @@ export default {
     }
   },
   computed: {
-    // HTTP-FLV 流地址
+    // 🔥【关键修改】使用 .live.mp4 后缀，原生支持，无需插件
     streamUrl() {
+      // 如果你想灵活传参，可以使用下面这行：
       if (!this.streamId) return ''
-      // ZLMediaKit 的 HTTP-FLV 地址格式: http://server/live/streamId.flv
-      return `${this.zlmServer}/live/${this.streamId}.flv`
+      return `${this.zlmServer}/live/${this.streamId}.live.mp4`
+
+      // 如果你想强制写死 drone03 测试，可以用这行：
+      // return `${this.zlmServer}/live/drone03.live.mp4`
     }
   },
   mounted() {
-    this.loadFlvJs()
+    // 直接初始化原生播放器，不需要等待 flv.js
+    this.initPlayer()
+
     this.checkMonitorStatus()
     // 定时检查监听状态
     this.monitorCheckTimer = setInterval(() => {
@@ -168,132 +166,56 @@ export default {
     }
   },
   methods: {
-    // 动态加载 flv.js
-    async loadFlvJs() {
-      if (window.flvjs) {
-        this.flvjs = window.flvjs
-        if (this.autoPlay && this.streamUrl) {
-          this.initPlayer()
-        }
-        return
-      }
-
-      this.loading = true
-      try {
-        // 从 CDN 加载 flv.js
-        const script = document.createElement('script')
-        script.src = 'https://cdn.jsdelivr.net/npm/flv.js@1.6.2/dist/flv.min.js'
-        script.async = true
-        
-        await new Promise((resolve, reject) => {
-          script.onload = () => {
-            this.flvjs = window.flvjs
-            resolve()
-          }
-          script.onerror = reject
-          document.head.appendChild(script)
-        })
-
-        console.log('✅ flv.js 加载成功')
-        if (this.autoPlay && this.streamUrl) {
-          this.initPlayer()
-        }
-      } catch (err) {
-        console.error('❌ flv.js 加载失败:', err)
-        this.hasError = true
-        this.errorMessage = 'flv.js 加载失败，请检查网络连接'
-      } finally {
-        this.loading = false
-      }
+    // 动态加载 flv.js (已废弃，保留空函数防止报错)
+    loadFlvJs() {
+      console.log('FMP4 模式：无需加载 flv.js')
     },
 
-    // 初始化播放器
+    // 🔥【关键修改】原生 FMP4 初始化逻辑
     initPlayer() {
-      if (!this.flvjs || !this.streamUrl) {
-        console.warn('flv.js 未加载或流地址为空')
+      const video = this.$refs.videoElement
+
+      if (!this.streamUrl) {
+        console.warn('流地址为空')
         return
       }
 
-      if (!this.flvjs.isSupported()) {
-        this.hasError = true
-        this.errorMessage = '您的浏览器不支持 FLV 播放'
-        console.error('❌ 浏览器不支持 FLV')
-        return
-      }
+      console.log('正在初始化 FMP4 播放:', this.streamUrl)
 
-      try {
-        this.loading = true
-        this.hasError = false
+      this.loading = true
+      this.hasError = false
 
-        // 销毁旧播放器
-        this.destroyPlayer()
+      // 1. 直接设置原生 src
+      video.src = this.streamUrl
+      // 2. 解决跨域问题（重要）
+      video.crossOrigin = 'anonymous'
 
-        // 创建 FLV 播放器
-        this.player = this.flvjs.createPlayer({
-          type: 'flv',
-          url: this.streamUrl,
-          isLive: true,
-          hasAudio: true,
-          hasVideo: true
-        }, {
-          enableWorker: false,
-          enableStashBuffer: false,
-          stashInitialSize: 128,
-          autoCleanupSourceBuffer: true
-        })
+      // 3. 加载
+      video.load()
 
-        // 绑定到 video 元素
-        this.player.attachMediaElement(this.$refs.videoElement)
-
-        // 监听事件
-        this.player.on(this.flvjs.Events.ERROR, (errorType, errorDetail, errorInfo) => {
-          console.error('FLV 播放器错误:', errorType, errorDetail, errorInfo)
-          this.hasError = true
+      // 4. 尝试自动播放
+      if (this.autoPlay) {
+        // 某些浏览器需要静音才能自动播放
+        // video.muted = true
+        video.play().then(() => {
+          console.log('✅ FMP4 自动播放成功')
+          this.isPlaying = true
           this.loading = false
-          this.isPlaying = false
-          
-          if (errorType === 'NetworkError') {
-            this.errorMessage = '网络连接失败，请检查流服务器是否可访问'
-          } else if (errorType === 'MediaError') {
-            this.errorMessage = '媒体解码错误，流格式可能不正确'
-          } else {
-            this.errorMessage = `播放错误: ${errorDetail}`
-          }
+        }).catch(err => {
+          console.warn('自动播放被阻止，可能需要用户交互:', err)
+          this.loading = false
+          // 如果是因为没静音导致的，可以在这里提示用户点击
         })
-
-        // 加载流
-        this.player.load()
-
-        // 自动播放
-        if (this.autoPlay) {
-          this.$refs.videoElement.play().then(() => {
-            console.log('✅ 自动播放成功')
-          }).catch(err => {
-            console.warn('自动播放被阻止，需要用户交互:', err)
-            this.loading = false
-          })
-        }
-
-      } catch (err) {
-        console.error('❌ 播放器初始化失败:', err)
-        this.hasError = true
-        this.errorMessage = '播放器初始化失败: ' + err.message
-        this.loading = false
       }
     },
 
     // 销毁播放器
     destroyPlayer() {
-      if (this.player) {
-        try {
-          this.player.pause()
-          this.player.unload()
-          this.player.detachMediaElement()
-          this.player.destroy()
-        } catch (err) {
-          console.warn('销毁播放器时出错:', err)
-        }
-        this.player = null
+      const video = this.$refs.videoElement
+      if (video) {
+        video.pause()
+        video.src = '' // 清空地址停止下载
+        video.load()
       }
       this.isPlaying = false
     },
@@ -305,14 +227,12 @@ export default {
 
       if (this.isPlaying) {
         video.pause()
+        this.isPlaying = false
       } else {
-        if (!this.player) {
-          this.initPlayer()
-        } else {
-          video.play().catch(err => {
-            console.error('播放失败:', err)
-          })
-        }
+        video.play().catch(err => {
+          console.error('播放失败:', err)
+        })
+        this.isPlaying = true
       }
     },
 
@@ -354,9 +274,14 @@ export default {
 
     onError(e) {
       console.error('视频元素错误:', e)
+      // 忽略手动切换 src 时的 abort 错误
+      if (this.$refs.videoElement && this.$refs.videoElement.error && this.$refs.videoElement.error.code === 20) {
+        return
+      }
+
       if (!this.hasError) {
         this.hasError = true
-        this.errorMessage = '视频加载失败'
+        this.errorMessage = '视频连接失败或流不存在'
       }
       this.loading = false
       this.isPlaying = false
@@ -364,11 +289,10 @@ export default {
 
     onWaiting() {
       console.log('缓冲中...')
-      // 直播流缓冲很正常，不显示 loading
     },
 
     // ======================================================================
-    // 监听控制方法
+    // 监听控制方法 (保持不变)
     // ======================================================================
 
     async toggleMonitor() {

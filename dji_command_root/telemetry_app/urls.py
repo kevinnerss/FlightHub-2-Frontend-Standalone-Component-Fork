@@ -12,6 +12,8 @@ from .views import (
     MediaLibraryViewSet,
     InspectTaskViewSet,
     LiveMonitorViewSet,
+    DronePositionViewSet,
+    FlightTaskProxyViewSet,
 )
 from . import views
 router = DefaultRouter()
@@ -26,6 +28,8 @@ router.register(r'media-library', MediaLibraryViewSet, basename='media-library')
 router.register(r'test/webhook', views.WebhookTestViewSet, basename='test-webhook')
 router.register(r'inspect-tasks', InspectTaskViewSet, basename='inspect-task')
 router.register(r'live-monitor', LiveMonitorViewSet, basename='live-monitor')
+router.register(r'drone-positions', DronePositionViewSet, basename='drone-position')
+router.register(r'flight-task-proxy', FlightTaskProxyViewSet, basename='flight-task-proxy')
 
 urlpatterns = [
     path('scan_candidate_folders', views.scan_candidate_folders),

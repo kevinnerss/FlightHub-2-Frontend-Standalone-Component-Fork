@@ -66,6 +66,7 @@ class Command(BaseCommand):
         super().__init__()
         self.download_queue = Queue()
         self.processed_message_ids = set()  # 防重复消息处理
+        self.max_log_len = int(os.getenv("MQTT_LOG_PAYLOAD_MAXLEN", "4000"))
 
     # ======================================================
     # 启动 Worker线程
@@ -129,9 +130,13 @@ class Command(BaseCommand):
     # 回调：收到消息
     # ======================================================
     def on_message(self, client, userdata, msg):
-        print(f"📩 收到 MQTT 消息：topic={msg.topic}, payload={msg.payload[:100]!r}")
         try:
-            payload = msg.payload.decode("utf-8")
+            payload_bytes = msg.payload or b""
+            print(f"📩 收到 MQTT 消息：topic={msg.topic}, bytes={len(payload_bytes)}")
+        except Exception:
+            print(f"📩 收到 MQTT 消息：topic={msg.topic}")
+        try:
+            payload = msg.payload.decode("utf-8", errors="ignore")
 
             data = json.loads(payload)
 
@@ -140,6 +145,34 @@ class Command(BaseCommand):
             if msg_id in self.processed_message_ids:
                 return
             self.processed_message_ids.add(msg_id)
+
+            # --- 智能日志过滤 (User Request) ---
+            # 识别机场心跳包 (Dock Heartbeat)，避免刷屏
+            sn = data.get("sn")
+            gateway = data.get("gateway")
+            gateway_sn = gateway.get("sn") if isinstance(gateway, dict) else gateway
+            
+            is_dock_heartbeat = False
+            if (not sn and gateway_sn) or (sn and gateway_sn and sn == gateway_sn):
+                is_dock_heartbeat = True
+
+            if is_dock_heartbeat and "osd" in msg.topic:
+                # 简化显示机场心跳
+                print(f"💓 [Dock OSD] Gateway: {gateway_sn} (Status OK) - 隐藏详细 JSON")
+            else:
+                # 显示完整/截断的 JSON
+                try:
+                    preview = json.dumps(data, ensure_ascii=False, indent=2)
+                    if len(preview) > self.max_log_len:
+                        print(preview[:self.max_log_len] + "...(truncated)")
+                    else:
+                        print(preview)
+                except Exception:
+                    s = payload
+                    if len(s) > self.max_log_len:
+                        print(s[:self.max_log_len] + "...(truncated)")
+                    else:
+                        print(s)
 
             # 提取文件信息
             file_name, file_url = extract_file_info(data)

@@ -55,7 +55,7 @@ module.exports = {
     // 静态资源处理
     config.module
       .rule('copyCesiumAssets')
-      .test(/Assets[\/\\]/)
+      .test(/Assets[/\\]/)
       .include
         .add(path.resolve(__dirname, 'node_modules/cesium'))
         .end()
@@ -66,7 +66,7 @@ module.exports = {
     // Workers处理
     config.module
       .rule('cesiumWorkers')
-      .test(/Workers[\/\\]/)
+      .test(/Workers[/\\]/)
       .include
         .add(path.resolve(__dirname, 'node_modules/cesium'))
         .end()
@@ -77,7 +77,7 @@ module.exports = {
     // ThirdParty处理
     config.module
       .rule('cesiumThirdParty')
-      .test(/ThirdParty[\/\\]/)
+      .test(/ThirdParty[/\\]/)
       .include
         .add(path.resolve(__dirname, 'node_modules/cesium'))
         .end()
@@ -88,7 +88,7 @@ module.exports = {
     // 处理Widgets的CSS
     config.module
       .rule('cesiumCSS')
-      .test(/Widgets[\/\\].*\.css/)
+      .test(/Widgets[/\\].*\.css/)
       .include
         .add(path.resolve(__dirname, 'node_modules/cesium'))
         .end()
@@ -102,6 +102,10 @@ module.exports = {
     },
     proxy: {
       '/api': {
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true
+      },
+      '/openapi': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true
       }

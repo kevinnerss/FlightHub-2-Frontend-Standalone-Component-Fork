@@ -6,7 +6,6 @@ import threading
 from django.core.management.base import BaseCommand
 from django.conf import settings
 from telemetry_app.models import InspectTask, InspectImage, AlarmCategory
-# 引入你在 views.py 里定义好的工具函数
 from telemetry_app.views import get_minio_client, auto_trigger_detect
 
 
@@ -24,13 +23,10 @@ class Command(BaseCommand):
         # ================= 配置区 =================
         # Django (backend) 访问 ZLM 的内部地址
         ZLM_API_HOST = "http://zlm:80"
-
-        # ZLM 默认 Secret (如果你没挂载配置文件改过的话)
-        # 如果你改了 zlm_config.ini，这里要换成你改的密码
-        ZLM_SECRET = "QIlf1WwTa1phKL6cTxWcCm0YhIlQFGGl"
+        ZLM_SECRET = "123456"
         # =========================================
 
-        # 1. 准备任务结构 (自动归档到当天)
+        # 1. 准备任务结构
         today_str = datetime.datetime.now().strftime('%Y%m%d')
         parent_task_name = f"{today_str}保护区直播汇总"
         bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "dji")
@@ -47,14 +43,15 @@ class Command(BaseCommand):
 
         # B. 确保有“保护区检测”这个分类
         category, _ = AlarmCategory.objects.get_or_create(
-            code="protection_zone",
-            defaults={"name": "保护区实时检测", "match_keyword": "保护区"}
+            code="protected_area",
+            defaults={"name": "保护区", "match_keyword": "保护区"}
         )
 
         # C. 创建本次直播的子任务
         now_time = datetime.datetime.now().strftime('%H%M%S')
         child_task_name = f"直播_{stream_id}_{now_time}"
-        # 构造一个虚拟路径，防止 Poller 扫描冲突
+
+        # 定义上传路径前缀 (修复了之前的变量未定义问题)
         virtual_prefix = f"fh_sync/live/{parent_task_name}/{child_task_name}/"
 
         current_task = InspectTask.objects.create(
@@ -66,7 +63,7 @@ class Command(BaseCommand):
             detect_status="processing"
         )
 
-        print(f"🚀 [监听启动] Server: 192.168.10.10 | Stream: {stream_id}")
+        print(f"🚀 [监听启动] Server: {ZLM_API_HOST} | Stream: {stream_id}")
         print(f"📂 [任务创建] {parent_task_name} -> {child_task_name}")
 
         s3 = get_minio_client()
@@ -75,59 +72,73 @@ class Command(BaseCommand):
         while True:
             try:
                 # 构造 ZLM 截图请求
-                # url 参数解释：告诉 ZLM 去截取 "rtmp://127.0.0.1..." 这个流
-                # 因为 ZLM 自己就在本机，所以填 127.0.0.1 它是能找到自己的
                 snap_api = f"{ZLM_API_HOST}/index/api/getSnap"
                 params = {
                     "secret": ZLM_SECRET,
                     "url": f"rtmp://127.0.0.1:1935/live/{stream_id}",
-                    "timeout_sec": 5,
+                    "timeout_sec": 15,
                     "expire_sec": 1
                 }
 
-                resp = requests.get(snap_api, params=params, timeout=5)
-                res_json = resp.json()
+                # 请求截图 (20s 超时，修复了之前的 Read timed out)
+                resp = requests.get(snap_api, params=params, timeout=20)
 
-                if res_json.get('code') == 0:
-                    # 获取图片下载地址 (注意：ZLM 返回的可能是相对路径或内部IP)
-                    # res_json['data'] 类似 "/index/api/getSnap/..."
-                    # 我们需要拼上 ZLM 的内部地址去下载
-                    img_download_url = ZLM_API_HOST + res_json['data']
+                if resp.status_code == 200:
+                    image_data = None
 
-                    img_resp = requests.get(img_download_url, timeout=5)
+                    # 智能判断: 如果是图片数据(FF D8开头)，直接用
+                    if resp.content.startswith(b'\xff\xd8'):
+                        image_data = resp.content
+                    else:
+                        # 否则尝试解析 JSON
+                        try:
+                            res_json = resp.json()
+                            if res_json.get('code') == 0:
+                                img_path = res_json.get('data')
+                                if not img_path.startswith('http'):
+                                    img_download_url = ZLM_API_HOST + img_path
+                                else:
+                                    img_download_url = img_path
 
-                    if img_resp.status_code == 200:
-                        # --- 上传 MinIO ---
-                        file_bytes = io.BytesIO(img_resp.content)
+                                img_resp = requests.get(img_download_url, timeout=10)
+                                if img_resp.status_code == 200:
+                                    image_data = img_resp.content
+                        except Exception:
+                            pass
+
+                    # --- 上传逻辑 ---
+                    if image_data:
+                        file_bytes = io.BytesIO(image_data)
                         file_size = file_bytes.getbuffer().nbytes
                         fname = f"frame_{datetime.datetime.now().strftime('%H%M%S_%f')}.jpg"
                         object_key = f"{virtual_prefix}{fname}"
 
+                        # 🔥【关键修复】Length 改为 ContentLength
                         s3.put_object(
                             Bucket=bucket_name,
                             Key=object_key,
                             Body=file_bytes,
-                            Length=file_size,
+                            ContentLength=file_size,
                             ContentType='image/jpeg'
                         )
 
-                        # --- 入库 & 触发检测 ---
+                        # 入库
                         InspectImage.objects.create(
                             inspect_task=current_task,
                             object_key=object_key,
                             detect_status='pending',
                             wayline=current_task.wayline
                         )
-                        print(f"📸 [截图] {fname} -> AI检测中...")
+                        print(f"📸 [截图成功] {fname} ({int(file_size / 1024)}KB) -> AI检测中...")
 
-                        # 异步触发 AI (复用 views.py 的逻辑)
+                        # 异步触发 AI
                         threading.Thread(target=auto_trigger_detect, args=(current_task,)).start()
+
                 else:
-                    # code != 0 通常意味着流还没推上来
-                    # print(f"等待推流... {res_json.get('msg')}")
-                    pass
+                    print(f"📡 等待推流... Status: {resp.status_code}")
 
             except Exception as e:
+                # 打印错误但不退出
                 print(f"❌ 异常: {e}")
 
             time.sleep(interval)

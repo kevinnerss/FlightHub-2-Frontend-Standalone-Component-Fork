@@ -42,12 +42,11 @@
             <span class="nav-label">巡检任务</span>
           </router-link>
 
-          <router-link to="/inspect-relationship" class="nav-item" :class="{ active: $route.path === '/inspect-relationship' }">
-            <span class="nav-icon">🔗</span>
-            <span class="nav-label">检测关系图</span>
+          <router-link to="/create-flight-task" class="nav-item" :class="{ active: $route.path === '/create-flight-task' }">
+            <span class="nav-icon">🚀</span>
+            <span class="nav-label">创建任务</span>
           </router-link>
-          
-          
+
           <router-link v-if="isAdmin" to="/user-management" class="nav-item" :class="{ active: $route.path === '/user-management' }">
             <span class="nav-icon">👥</span>
             <span class="nav-label">人员管理</span>

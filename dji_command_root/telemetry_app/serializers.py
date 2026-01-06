@@ -18,6 +18,7 @@ from .models import (
     MediaFolderConfig,
     InspectTask,
     InspectImage,
+    DronePosition,
 )
 
 
@@ -258,6 +259,7 @@ class InspectTaskSerializer(serializers.ModelSerializer):
     detect_category_code = serializers.CharField(source='detect_category.code', read_only=True)
     category_details = AlarmCategorySerializer(source='detect_category', read_only=True)
     parent_task_details = serializers.SerializerMethodField()
+    alarm_count = serializers.SerializerMethodField()
 
     class Meta:
         model = InspectTask
@@ -266,6 +268,9 @@ class InspectTaskSerializer(serializers.ModelSerializer):
             'started_at', 'finished_at', 'expire_at', 'detect_category', 'detect_category_name',
             'detect_category_code', 'category_details', 'detect_status', 'is_cleaned',
             'created_at', 'parent_task', 'parent_task_details',
+            'dji_task_uuid', 'dji_task_name', 'last_image_uploaded_at',  # 🔥 新增字段
+            'device_sn',  # 🔥 设备SN
+            'alarm_count',  # 🔥 聚合字段
         ]
         read_only_fields = ['id', 'detect_status', 'is_cleaned', 'created_at', 'parent_task']
 
@@ -276,6 +281,16 @@ class InspectTaskSerializer(serializers.ModelSerializer):
                 'external_task_id': obj.parent_task.external_task_id,
             }
         return None
+
+    def get_alarm_count(self, obj):
+        """获取该任务下的告警数量"""
+        # 1. 查找关联的图片
+        # 2. 查找图片关联的告警
+        # 或者更直接：Alarm 有 source_image__inspect_task 吗？
+        # Alarm 关联的是 source_image (InspectImage)
+        # InspectImage 关联的是 inspect_task
+        # 所以查询: Alarm.objects.filter(source_image__inspect_task=obj).count()
+        return Alarm.objects.filter(source_image__inspect_task=obj).count()
 
 
 class InspectImageSerializer(serializers.ModelSerializer):
@@ -344,3 +359,19 @@ class InspectImageSerializer(serializers.ModelSerializer):
         
         # 默认返回0（正常）
         return 0
+
+
+class DronePositionSerializer(serializers.ModelSerializer):
+    """
+    无人机位置信息序列化器
+    用于API返回和数据分析
+    """
+    class Meta:
+        model = DronePosition
+        fields = [
+            "id", "device_sn", "device_model", "latitude", "longitude",
+            "altitude", "relative_height", "heading", "speed_horizontal",
+            "speed_vertical", "battery_percent", "signal_quality",
+            "raw_data", "mqtt_topic", "timestamp", "created_at"
+        ]
+        read_only_fields = ["id", "created_at"]
