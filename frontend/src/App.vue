@@ -6,65 +6,101 @@
         <!-- Logo区域 -->
         <div class="logo-section">
           <div class="logo-icon">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
+            <img
+                src="@/assets/logo.png"
+                alt="FlightHub Logo"
+                class="logo-img"
+            />
           </div>
           <span class="logo-text">FlightHub</span>
         </div>
-        
+
         <!-- 导航菜单 -->
         <nav class="nav-menu">
-          <router-link to="/" class="nav-item" :class="{ active: $route.path === '/' }">
+          <router-link
+              to="/main-view"
+              class="nav-item"
+              :class="{ active: $route.path === '/main-view' }"
+          >
+            <span class="nav-icon">🏠</span>
+            <span class="nav-label">首页</span>
+          </router-link>
+
+          <router-link
+              to="/"
+              class="nav-item"
+              :class="{ active: $route.path === '/' }"
+          >
             <span class="nav-icon">🎯</span>
             <span class="nav-label">主控台</span>
           </router-link>
-          
-          <router-link to="/alarm-management" class="nav-item" :class="{ active: $route.path === '/alarm-management' }">
+
+          <router-link
+              to="/alarm-management"
+              class="nav-item"
+              :class="{ active: $route.path === '/alarm-management' }"
+          >
             <span class="nav-icon">⚠️</span>
             <span class="nav-label">告警管理</span>
           </router-link>
-          
-          <router-link to="/alarm-stats" class="nav-item" :class="{ active: $route.path === '/alarm-stats' }">
+
+          <router-link
+              to="/alarm-stats"
+              class="nav-item"
+              :class="{ active: $route.path === '/alarm-stats' }"
+          >
             <span class="nav-icon">📊</span>
             <span class="nav-label">告警统计</span>
           </router-link>
-          
-          <router-link to="/carousel-detection" class="nav-item" :class="{ active: $route.path === '/carousel-detection' }">
+
+          <router-link
+              to="/carousel-detection"
+              class="nav-item"
+              :class="{ active: $route.path === '/carousel-detection' }"
+          >
             <span class="nav-icon">🖼️</span>
             <span class="nav-label">轮播检测</span>
           </router-link>
 
-          <router-link to="/inspect-task-management" class="nav-item" :class="{ active: $route.path === '/inspect-task-management' }">
+          <router-link
+              to="/inspect-task-management"
+              class="nav-item"
+              :class="{ active: $route.path === '/inspect-task-management' }"
+          >
             <span class="nav-icon">📋</span>
             <span class="nav-label">巡检任务</span>
           </router-link>
 
-          <router-link to="/create-flight-task" class="nav-item" :class="{ active: $route.path === '/create-flight-task' }">
-            <span class="nav-icon">🚀</span>
-            <span class="nav-label">创建任务</span>
+          <router-link
+              to="/inspect-relationship"
+              class="nav-item"
+              :class="{ active: $route.path === '/inspect-relationship' }"
+          >
+            <span class="nav-icon">🔗</span>
+            <span class="nav-label">检测关系图</span>
           </router-link>
 
-          <router-link v-if="isAdmin" to="/user-management" class="nav-item" :class="{ active: $route.path === '/user-management' }">
+          <router-link
+              v-if="isAdmin"
+              to="/user-management"
+              class="nav-item"
+              :class="{ active: $route.path === '/user-management' }"
+          >
             <span class="nav-icon">👥</span>
             <span class="nav-label">人员管理</span>
           </router-link>
 
           <router-link
-            v-if="isAdmin"
-            to="/component-config"
-            class="nav-item"
-            :class="{ active: $route.path === '/component-config' }"
+              v-if="isAdmin"
+              to="/component-config"
+              class="nav-item"
+              :class="{ active: $route.path === '/component-config' }"
           >
             <span class="nav-icon">🛠️</span>
             <span class="nav-label">组件配置</span>
           </router-link>
-
-
         </nav>
-        
+
         <!-- 用户信息区域 -->
         <div class="user-section">
           <div class="user-info">
@@ -84,7 +120,7 @@
         </div>
       </div>
     </div>
-    
+
     <!-- 主内容区域 -->
     <div class="main-content">
       <router-view />
@@ -94,65 +130,65 @@
 
 <script>
 export default {
-  name: 'App',
+  name: "App",
   data() {
     return {
       isAuthenticated: false,
       isAdmin: false,
-      currentUserName: ''
-    }
+      currentUserName: "",
+    };
   },
   created() {
-    console.log('App 组件已创建')
-    this.updateAuthStatus()
+    console.log("App 组件已创建");
+    this.updateAuthStatus();
   },
   mounted() {
-    console.log('App 组件已挂载')
-    
+    console.log("App 组件已挂载");
+
     // 监听路由变化，更新认证状态
     this.$router.afterEach(() => {
-      this.updateAuthStatus()
-    })
+      this.updateAuthStatus();
+    });
   },
   methods: {
     updateAuthStatus() {
-      const token = localStorage.getItem('token')
-      const userInfoStr = localStorage.getItem('userInfo')
-      
-      this.isAuthenticated = !!token
-      
+      const token = localStorage.getItem("token");
+      const userInfoStr = localStorage.getItem("userInfo");
+
+      this.isAuthenticated = !!token;
+
       if (userInfoStr) {
         try {
-          const userInfo = JSON.parse(userInfoStr)
-          this.currentUserName = userInfo.name || userInfo.username
-          this.isAdmin = userInfo.role === 'admin'
+          const userInfo = JSON.parse(userInfoStr);
+          this.currentUserName = userInfo.name || userInfo.username;
+          this.isAdmin = userInfo.role === "admin";
         } catch (e) {
-          console.error('解析用户信息失败:', e)
-          this.currentUserName = ''
-          this.isAdmin = false
+          console.error("解析用户信息失败:", e);
+          this.currentUserName = "";
+          this.isAdmin = false;
         }
       } else {
-        this.currentUserName = ''
-        this.isAdmin = false
+        this.currentUserName = "";
+        this.isAdmin = false;
       }
     },
     async handleLogout() {
       try {
-        await this.$store.dispatch('logout')
-        localStorage.removeItem('userInfo')
-        this.isAuthenticated = false
-        this.isAdmin = false
-        this.currentUserName = ''
-        this.$router.push('/login')
+        await this.$store.dispatch("logout");
+        localStorage.removeItem("userInfo");
+        this.isAuthenticated = false;
+        this.isAdmin = false;
+        this.currentUserName = "";
+        this.$router.push("/login");
       } catch (error) {
-        console.error('登出失败:', error)
-        localStorage.removeItem('token')
-        localStorage.removeItem('userInfo')
-        this.$router.push('/login')
+        console.error("登出失败:", error);
+        localStorage.removeItem("token");
+        localStorage.removeItem("userInfo");
+        this.$router.push("/login");
       }
-    }
-  }
-}
+    },
+  },
+};
 </script>
 
 <style>
@@ -164,7 +200,8 @@ export default {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+  "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -180,15 +217,22 @@ body {
 
 /* 背景装饰 */
 .app-container::before {
-  content: '';
+  content: "";
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: 
-    radial-gradient(circle at 20% 30%, rgba(0, 212, 255, 0.08) 0%, transparent 50%),
-    radial-gradient(circle at 80% 70%, rgba(168, 85, 247, 0.06) 0%, transparent 50%);
+  background: radial-gradient(
+      circle at 20% 30%,
+      rgba(0, 212, 255, 0.08) 0%,
+      transparent 50%
+  ),
+  radial-gradient(
+      circle at 80% 70%,
+      rgba(168, 85, 247, 0.06) 0%,
+      transparent 50%
+  );
   pointer-events: none;
   z-index: 0;
 }
@@ -224,16 +268,29 @@ body {
 }
 
 .logo-icon {
-  width: 36px;
-  height: 36px;
-  color: #00d4ff;
-  filter: drop-shadow(0 0 8px rgba(0, 212, 255, 0.5));
+  width: 80px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 0 8px rgba(0, 212, 255, 0.4));
   animation: pulse 3s ease-in-out infinite;
 }
 
+.logo-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.8; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
 }
 
 .logo-text {
@@ -270,13 +327,17 @@ body {
 }
 
 .nav-item::before {
-  content: '';
+  content: "";
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: linear-gradient(135deg, rgba(0, 212, 255, 0.1) 0%, rgba(0, 153, 255, 0.1) 100%);
+  background: linear-gradient(
+      135deg,
+      rgba(0, 212, 255, 0.1) 0%,
+      rgba(0, 153, 255, 0.1) 100%
+  );
   opacity: 0;
   transition: opacity 0.3s ease;
 }
@@ -292,12 +353,17 @@ body {
 
 .nav-item.active {
   color: #00d4ff;
-  background: linear-gradient(135deg, rgba(0, 212, 255, 0.15) 0%, rgba(0, 153, 255, 0.15) 100%);
-  box-shadow: 0 0 20px rgba(0, 212, 255, 0.2), inset 0 0 20px rgba(0, 212, 255, 0.1);
+  background: linear-gradient(
+      135deg,
+      rgba(0, 212, 255, 0.15) 0%,
+      rgba(0, 153, 255, 0.15) 100%
+  );
+  box-shadow: 0 0 20px rgba(0, 212, 255, 0.2),
+  inset 0 0 20px rgba(0, 212, 255, 0.1);
 }
 
 .nav-item.active::after {
-  content: '';
+  content: "";
   position: absolute;
   bottom: 0;
   left: 20px;
@@ -435,7 +501,7 @@ body {
   .nav-content {
     padding: 0 20px;
   }
-  
+
   .user-info {
     display: none;
   }
@@ -448,17 +514,17 @@ body {
     padding: 16px;
     gap: 16px;
   }
-  
+
   .nav-menu {
     width: 100%;
     justify-content: flex-start;
     overflow-x: auto;
   }
-  
+
   .nav-item {
     white-space: nowrap;
   }
-  
+
   .logo-text {
     display: none;
   }

@@ -1,0 +1,233 @@
+# ============================================
+# 操作系统相关
+# ============================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+.directory
+
+# ============================================
+# IDE 和编辑器
+# ============================================
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# IntelliJ IDEA / PyCharm
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# ============================================
+# Python / Django
+# ============================================
+# Python 字节码
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+*.sqlite3
+*.db
+*.db-journal
+
+# Python 虚拟环境
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# Python 包分发
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.manifest
+*.spec
+
+# PyInstaller
+*.manifest
+*.spec
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# ============================================
+# Node.js / Vue.js / 前端
+# ============================================
+# 依赖目录
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# 构建输出
+dist/
+build/
+*.local
+
+# 环境变量
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 日志文件
+logs/
+*.log
+
+# 编辑器目录和文件
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ============================================
+# 临时文件和缓存
+# ============================================
+# 临时文件
+*.tmp
+*.temp
+tmp/
+temp/
+*.bak
+*.swp
+*.swo
+*~
+
+# 缓存目录
+.cache/
+.parcel-cache/
+.npm/
+.eslintcache
+.stylelintcache
+
+# ============================================
+# 测试和覆盖率
+# ============================================
+# 测试覆盖率
+coverage/
+.nyc_output/
+*.lcov
+
+# Jest
+.jest/
+
+# ============================================
+# 数据库
+# ============================================
+# SQLite
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# 数据库备份
+*.sql
+!update_table_structure.sql
+
+# ============================================
+# 媒体和上传文件
+# ============================================
+# 上传的媒体文件（根据项目需要调整）
+media/
+uploads/
+staticfiles/
+
+# ============================================
+# 文档和配置文件（敏感信息）
+# ============================================
+# 包含敏感信息的配置文件
+config.local.js
+config.local.json
+secrets.json
+*.key
+*.pem
+*.cert
+
+# ============================================
+# Docker
+# ============================================
+# Docker 相关（如果需要）
+.dockerignore
+
+# ============================================
+# 其他
+# ============================================
+# 压缩文件
+*.tar
+*.tar.gz
+*.zip
+*.rar
+*.7z
+
+# 系统文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# 项目特定
+temp_test.db
+temp_test.db-journal
+tmp_write.txt
+temp_styles.txt
+nginx.tar
+
+# 特殊
+frontend/public/models/
