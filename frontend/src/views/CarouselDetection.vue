@@ -206,14 +206,8 @@
 
           <div v-if="flowSlides.length > 1" class="controls">
             <button class="control-btn ghost" @click="prevSlide">上一张</button>
-            <div class="dots">
-              <button
-                v-for="(slide, idx) in flowSlides"
-                :key="slide.key"
-                class="dot"
-                :class="{ active: idx === activeIndex }"
-                @click="goTo(idx)"
-              />
+            <div class="progress-count">
+              {{ activeIndex + 1 }}/{{ flowSlides.length }}
             </div>
             <button class="control-btn ghost" @click="nextSlide">下一张</button>
           </div>
@@ -292,14 +286,16 @@
               >
                 上一张
               </button>
-              <div class="dots">
-                <span
-                  v-for="(img, idx) in inspectImages"
-                  :key="img.id || idx"
-                  class="dot"
-                  :class="{ active: idx === inspectIndex }"
-                />
+              <div class="progress-count">
+                {{ inspectIndex + 1 }}/{{ inspectImages.length }}
               </div>
+              <button
+                class="control-btn ghost"
+                @click="jumpToLatestInspectImage"
+                :disabled="!inspectImages.length || inspectIndex >= inspectImages.length - 1"
+              >
+                跳到最新
+              </button>
               <button
                 v-if="inspectPausedOnAnomaly"
                 class="control-btn"
@@ -672,9 +668,6 @@ export default {
           if (this.inspectImages.length > 0) {
             this.inspectIndex = Math.min(savedIndex, this.inspectImages.length - 1)
           }
-        } else if (task.detect_status === 'scanning' && this.inspectImages.length > 0) {
-          // 实时任务自动跳至最新
-          this.inspectIndex = this.inspectImages.length - 1
         }
       } catch (err) {
         console.error('选择巡检任务进行回放失败:', err)
@@ -909,6 +902,11 @@ export default {
         // 当前任务图片回放完毕，检查下一个任务
         this.checkAndPlayNextTask()
       }
+    },
+
+    jumpToLatestInspectImage() {
+      if (!this.inspectImages.length) return
+      this.inspectIndex = Math.max(this.inspectImages.length - 1, 0)
     },
 
     // 检查并播放下一个任务
@@ -2725,24 +2723,11 @@ export default {
   background: rgba(14, 165, 233, 0.08);
 }
 
-.dots {
-  display: flex;
-  gap: 6px;
-}
-
-.dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  border: none;
-  background: rgba(255, 255, 255, 0.14);
-  cursor: pointer;
-  transition: transform 0.2s ease, background 0.2s ease;
-}
-
-.dot.active {
-  background: linear-gradient(135deg, #0ea5e9, #22d3ee);
-  transform: scale(1.05);
+.progress-count {
+  color: #e0f2fe;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 0 10px;
 }
 
 .marquee-wrapper {

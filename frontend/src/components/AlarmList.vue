@@ -31,6 +31,10 @@
           {{ wayline.wayline_id }} - {{ wayline.name }}
         </option>
       </select>
+
+      <button @click="clearAllAlarms" class="action-btn delete-btn clear-all-btn">
+        清空记录
+      </button>
     </div>
     
     <!-- 告警表格 -->
@@ -590,6 +594,19 @@ export default {
 .delete-btn:hover {
   background: rgba(239, 68, 68, 0.3);
   transform: translateY(-1px);
+}
+
+.clear-all-btn {
+  margin-left: auto;
+  padding: 8px 16px;
+  font-weight: 600;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.clear-all-btn:hover {
+  background: rgba(239, 68, 68, 0.3);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
 }
 
 /* 分页器 - 复用UserManagement样式 */

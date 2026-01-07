@@ -1465,6 +1465,89 @@ class WaylineViewSet(viewsets.ModelViewSet):
         variants = variants_map.get(norm, {norm})
         return qs.filter(detect_type__in=list(variants))
 
+    @action(detail=False, methods=['get'], url_path='tree')
+    def tree(self, request):
+        type_labels = {
+            "rail": "轨道",
+            "contactline": "接触网",
+            "bridge": "桥梁",
+            "protected_area": "保护区",
+        }
+        variants_map = {
+            "rail": {"rail", "track"},
+            "contactline": {"contactline", "catenary", "overhead", "insulator", "pole"},
+            "bridge": {"bridge"},
+            "protected_area": {"protected_area", "protection_zone", "protection_area"},
+        }
+        groups = {k: {"type": k, "label": v, "items": []} for k, v in type_labels.items()}
+        waylines = Wayline.objects.all().only("id", "wayline_id", "name", "detect_type")
+        for w in waylines:
+            dt = (w.detect_type or "").lower()
+            bucket_type = None
+            for k, variants in variants_map.items():
+                if dt in variants:
+                    bucket_type = k
+                    break
+            if not bucket_type:
+                bucket_type = "rail"
+            recent = InspectTask.objects.filter(wayline=w).order_by(
+                "-last_image_uploaded_at", "-finished_at", "-started_at", "-created_at"
+            ).first()
+            recent_time = None
+            recent_id = None
+            if recent:
+                recent_time = recent.last_image_uploaded_at or recent.finished_at or recent.started_at or recent.created_at
+                recent_id = recent.id
+            groups[bucket_type]["items"].append({
+                "id": w.id,
+                "wayline_id": w.wayline_id,
+                "name": w.name,
+                "recent_task_time": recent_time.isoformat() if recent_time else None,
+                "recent_task_id": recent_id,
+            })
+        for g in groups.values():
+            g["items"].sort(key=lambda x: (x["recent_task_time"] is not None, x["recent_task_time"] or ""), reverse=True)
+            g["count"] = len(g["items"])
+        ordered = ["rail", "contactline", "bridge", "protected_area"]
+        data = [groups[t] for t in ordered]
+        return Response({"groups": data})
+    
+    @action(detail=True, methods=['get'], url_path='action-details')
+    def action_details(self, request, pk=None):
+        """
+        获取指定航线的指纹动作详情及UUID集合
+        返回字段：
+          - wayline: { id, wayline_id, name, detect_type }
+          - detect_category: { id, name, code } 或 null
+          - action_uuids: [uuid...]
+          - action_details: [{ uuid, lat, lon, height, ellipsoid_height, gimbal_yaw, aircraft_heading }, ...]
+        """
+        try:
+            wayline = Wayline.objects.filter(pk=pk).first()
+            if not wayline:
+                return Response({"detail": "Wayline not found"}, status=404)
+            fp = WaylineFingerprint.objects.filter(wayline=wayline).first()
+            detect_category = None
+            if fp and fp.detect_category:
+                detect_category = {
+                    "id": fp.detect_category.id,
+                    "name": fp.detect_category.name,
+                    "code": fp.detect_category.code
+                }
+            data = {
+                "wayline": {
+                    "id": wayline.id,
+                    "wayline_id": wayline.wayline_id,
+                    "name": wayline.name,
+                    "detect_type": wayline.detect_type
+                },
+                "detect_category": detect_category,
+                "action_uuids": fp.action_uuids if fp and fp.action_uuids else [],
+                "action_details": fp.action_details if fp and fp.action_details else []
+            }
+            return Response(data)
+        except Exception as e:
+            return Response({"detail": str(e)}, status=500)
     # =========================================================
     # 🆕 新增接口: 同步航线数据 (POST /waylines/sync_data/)
     # =========================================================

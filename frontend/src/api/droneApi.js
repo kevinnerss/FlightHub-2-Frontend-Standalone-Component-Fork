@@ -256,5 +256,16 @@ export default {
       console.error('紧急停止失败:', error)
       throw error
     }
+  },
+
+  // 获取设备列表（后端代理司空 /openapi/v0.1/device）
+  async getDevices(params = {}) {
+    try {
+      const response = await api.get('/flight-task-proxy/devices', { params })
+      return response
+    } catch (error) {
+      console.error('获取设备列表失败:', error)
+      throw error
+    }
   }
 }

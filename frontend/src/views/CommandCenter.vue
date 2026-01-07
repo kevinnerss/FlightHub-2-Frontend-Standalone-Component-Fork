@@ -127,6 +127,32 @@
         </div>
       </div>
 
+      <div class="panel-card">
+        <div class="card-header">
+          <div class="header-icon">🌲</div>
+          <div class="header-title">航线树</div>
+        </div>
+        <div class="card-body">
+          <div v-if="treeLoading" class="empty-placeholder">加载中...</div>
+          <div v-else-if="treeError" class="empty-placeholder">{{ treeError }}</div>
+          <div v-else class="tree-container">
+            <div class="tree-group" v-for="group in waylineTree" :key="group.type">
+              <div class="tree-group-header" @click="toggleGroup(group.type)">
+                <span class="group-name">{{ group.label }}</span>
+                <span class="group-count">（{{ group.count }} 条航线）</span>
+                <span class="toggle-icon">{{ expandedMap[group.type] ? '▼' : '▶' }}</span>
+              </div>
+              <div class="tree-items" v-show="expandedMap[group.type]">
+                <div class="tree-item" v-for="item in group.items" :key="item.id" @click="selectWayline(item)">
+                  <span class="item-name">{{ item.name }}</span>
+                  <span class="item-meta" v-if="item.recent_task_time">最近任务：{{ formatTime(item.recent_task_time) }}</span>
+                </div>
+                <div v-if="!group.items.length" class="empty-placeholder">暂无航线</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
       <!-- 中间3D模型展示区 -->
       <div class="center-panel">
         <div class="model-display-area">
@@ -241,6 +267,7 @@
 <script>
 import alarmApi from '../api/alarmApi.js'
 import inspectTaskApi from '../api/inspectTaskApi.js'
+import waylineApi from '../api/waylineApi.js'
 
 export default {
   name: 'CommandCenter',
@@ -271,7 +298,11 @@ export default {
       // 最近事件（最新的InspectTask）
       recentEvents: [],
       // 定时器
-      refreshTimer: null
+      refreshTimer: null,
+      waylineTree: [],
+      treeLoading: false,
+      treeError: '',
+      expandedMap: {}
     }
   },
   computed: {
@@ -341,6 +372,7 @@ export default {
   },
   mounted() {
     this.loadAllData()
+    this.loadWaylineTree()
     // 每30秒刷新一次数据
     this.refreshTimer = setInterval(() => {
       this.loadAllData()
@@ -352,6 +384,43 @@ export default {
     }
   },
   methods: {
+    async loadWaylineTree() {
+      try {
+        this.treeLoading = true
+        this.treeError = ''
+        const res = await waylineApi.getWaylineTree()
+        const groups = res.groups || []
+        groups.forEach(g => {
+          if (Array.isArray(g.items)) {
+            g.items.sort((a, b) => {
+              const ta = a.recent_task_time ? new Date(a.recent_task_time).getTime() : 0
+              const tb = b.recent_task_time ? new Date(b.recent_task_time).getTime() : 0
+              return tb - ta
+            })
+          }
+          if (this.expandedMap[g.type] === undefined) {
+            this.$set ? this.$set(this.expandedMap, g.type, true) : (this.expandedMap[g.type] = true)
+          }
+        })
+        this.waylineTree = groups
+      } catch (e) {
+        this.treeError = '加载失败'
+      } finally {
+        this.treeLoading = false
+      }
+    },
+    toggleGroup(type) {
+      const current = !!this.expandedMap[type]
+      if (this.$set) {
+        this.$set(this.expandedMap, type, !current)
+      } else {
+        this.expandedMap[type] = !current
+      }
+    },
+    selectWayline(item) {
+      if (!item || !item.id) return
+      this.$router.push({ name: 'DjiDashboard', query: { wayline_id: item.id } })
+    },
     async loadAllData() {
       await Promise.all([
         this.loadTaskStats(),
@@ -897,6 +966,49 @@ export default {
 }
 
 /* 任务统计 */
+
+.tree-container {
+  max-height: 280px;
+  overflow-y: auto;
+}
+.tree-group {
+  margin-bottom: 12px;
+}
+.tree-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #e0f2fe;
+  margin-bottom: 6px;
+}
+.group-count {
+  color: #94a3b8;
+  font-size: 12px;
+}
+.toggle-icon {
+  margin-left: auto;
+  color: #64b5f6;
+  font-size: 12px;
+}
+.tree-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+}
+.tree-item:last-child {
+  border-bottom: none;
+}
+.item-name {
+  color: #e2e8f0;
+  font-size: 13px;
+}
+.item-meta {
+  color: #94a3b8;
+  font-size: 12px;
+}
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

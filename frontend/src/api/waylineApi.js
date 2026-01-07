@@ -43,6 +43,24 @@ export default {
       throw error
     }
   },
+  async getWaylineTree() {
+    try {
+      const response = await api.get('/waylines/tree/')
+      return response
+    } catch (error) {
+      console.error('获取航线树失败:', error)
+      throw error
+    }
+  },
+  async getWaylineActionDetails(waylineId) {
+    try {
+      const response = await api.get(`/waylines/${waylineId}/action-details/`)
+      return response
+    } catch (error) {
+      console.error('获取航线动作详情失败:', error)
+      throw error
+    }
+  },
 
   // 获取单个航线详情
   async getWaylineDetail(waylineId) {

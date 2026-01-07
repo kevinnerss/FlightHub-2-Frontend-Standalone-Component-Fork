@@ -1,4 +1,4 @@
-﻿import os
+import os
 import json
 from rest_framework import serializers
 from django.contrib.auth.models import User
@@ -260,6 +260,8 @@ class InspectTaskSerializer(serializers.ModelSerializer):
     category_details = AlarmCategorySerializer(source='detect_category', read_only=True)
     parent_task_details = serializers.SerializerMethodField()
     alarm_count = serializers.SerializerMethodField()
+    total_images = serializers.SerializerMethodField()
+    completed_images = serializers.SerializerMethodField()
 
     class Meta:
         model = InspectTask
@@ -271,6 +273,7 @@ class InspectTaskSerializer(serializers.ModelSerializer):
             'dji_task_uuid', 'dji_task_name', 'last_image_uploaded_at',  # 🔥 新增字段
             'device_sn',  # 🔥 设备SN
             'alarm_count',  # 🔥 聚合字段
+            'total_images', 'completed_images', # 🔥 进度字段
         ]
         read_only_fields = ['id', 'detect_status', 'is_cleaned', 'created_at', 'parent_task']
 
@@ -283,14 +286,21 @@ class InspectTaskSerializer(serializers.ModelSerializer):
         return None
 
     def get_alarm_count(self, obj):
-        """获取该任务下的告警数量"""
-        # 1. 查找关联的图片
-        # 2. 查找图片关联的告警
-        # 或者更直接：Alarm 有 source_image__inspect_task 吗？
-        # Alarm 关联的是 source_image (InspectImage)
-        # InspectImage 关联的是 inspect_task
-        # 所以查询: Alarm.objects.filter(source_image__inspect_task=obj).count()
-        return Alarm.objects.filter(source_image__inspect_task=obj).count()
+        ids = [obj.id] + list(obj.sub_tasks.values_list('id', flat=True))
+        cnt = Alarm.objects.filter(source_image__inspect_task_id__in=ids).count()
+        if cnt == 0 and obj.wayline_id:
+            t0 = obj.started_at or obj.created_at
+            q = Alarm.objects.filter(wayline=obj.wayline)
+            if t0:
+                q = q.filter(created_at__gte=t0)
+            cnt = q.count()
+        return cnt
+
+    def get_total_images(self, obj):
+        return obj.images.count()
+
+    def get_completed_images(self, obj):
+        return obj.images.filter(detect_status='done').count()
 
 
 class InspectImageSerializer(serializers.ModelSerializer):

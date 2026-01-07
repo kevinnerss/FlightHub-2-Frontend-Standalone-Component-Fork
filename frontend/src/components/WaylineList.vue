@@ -3,33 +3,50 @@
     <!-- 航线列表头部 -->
     <div class="list-header">
       <h3 class="list-title">航线列表</h3>
-      <span v-if="waylines.length > 0" class="wayline-count">{{ waylines.length }}</span>
+      <span v-if="waylineTree.length > 0" class="wayline-count">{{ totalWaylineCount }}</span>
     </div>
     
     <!-- 航线项列表 -->
     <div class="wayline-items" v-loading="loading">
-      <div v-if="waylines.length === 0" class="empty-state">
+      <div v-if="!loading && waylineTree.length === 0" class="empty-state">
         <div class="empty-icon">📍</div>
         <p>暂无航线</p>
       </div>
       
-      <div 
-        v-else
-        v-for="wayline in waylines" 
-        :key="wayline.id"
-        class="wayline-item"
-        :class="{ selected: wayline.id === currentSelectedId }"
-        @click="handleSelect(wayline)"
-      >
-        <div class="wayline-item-header">
-          <span class="wayline-id">ID: {{ wayline.id }}</span>
-          <span class="wayline-duration" v-if="wayline.estimated_duration">
-            <span class="duration-icon">⏱️</span>
-            {{ formatDuration(wayline.estimated_duration) }}
-          </span>
+      <div v-else>
+        <div 
+          class="tree-group" 
+          v-for="group in waylineTree" 
+          :key="group.type"
+        >
+          <div class="tree-group-header" @click="toggleGroup(group.type)">
+            <span class="group-name">{{ group.label }}</span>
+            <span class="group-count">（{{ group.count }} 条航线）</span>
+            <span class="toggle-icon">{{ expandedMap[group.type] ? '▼' : '▶' }}</span>
+          </div>
+          <div class="tree-items" v-show="expandedMap[group.type]">
+            <div 
+              class="wayline-item"
+              v-for="item in group.items" 
+              :key="item.id"
+              :class="{ selected: item.id === currentSelectedId }"
+              @click="handleSelect(item)"
+            >
+              <div class="wayline-item-header">
+                <span class="wayline-id">ID: {{ item.id }}</span>
+                <span class="wayline-duration" v-if="item.estimated_duration">
+                  <span class="duration-icon">⏱️</span>
+                  {{ formatDuration(item.estimated_duration) }}
+                </span>
+              </div>
+              <div class="wayline-name">
+                {{ item.name }}
+                <span class="recent-meta" v-if="item.recent_task_time">（最近任务：{{ formatRecent(item.recent_task_time) }}）</span>
+              </div>
+              <div class="select-indicator"></div>
+            </div>
+          </div>
         </div>
-        <div class="wayline-name">{{ wayline.name }}</div>
-        <div class="select-indicator"></div>
       </div>
     </div>
   </div>
@@ -49,41 +66,66 @@ export default {
   emits: ['wayline-selected'],
   data() {
     return {
-      waylines: [],
-      loading: false
+      waylineTree: [],
+      loading: false,
+      expandedMap: {}
+    }
+  },
+  computed: {
+    totalWaylineCount() {
+      return this.waylineTree.reduce((sum, g) => {
+        const count = Array.isArray(g.items) ? g.items.length : 0
+        return sum + count
+      }, 0)
     }
   },
   async mounted() {
-    await this.loadWaylines()
+    await this.loadWaylineTree()
   },
   methods: {
-    async loadWaylines() {
+    async loadWaylineTree() {
       this.loading = true
       try {
+        const res = await waylineApi.getWaylineTree()
+        const groups = res.groups || []
+        groups.forEach(g => {
+          if (Array.isArray(g.items)) {
+            g.items.sort((a, b) => {
+              const ta = a.recent_task_time ? new Date(a.recent_task_time).getTime() : 0
+              const tb = b.recent_task_time ? new Date(b.recent_task_time).getTime() : 0
+              return tb - ta
+            })
+          }
+        })
+        this.waylineTree = groups
+        this.ensureDefaultExpand()
+        this.autoSelectFirstIfNeeded()
+      } catch (error) {
+        console.error('加载航线树失败，回退到平铺列表:', error)
+        await this.loadFlatWaylinesFallback()
+      } finally {
+        this.loading = false
+      }
+    },
+    async loadFlatWaylinesFallback() {
+      try {
         const response = await waylineApi.getWaylines({})
-        this.waylines = (response?.results || []).map(wayline => ({
+        const list = (response?.results || []).map(wayline => ({
           id: wayline.id,
           name: wayline.name,
           estimated_duration: wayline.estimated_duration
         }))
-        
-        if (this.waylines.length > 0 && !this.currentSelectedId) {
-          this.$emit('wayline-selected', this.waylines[0])
-        }
-      } catch (error) {
-        console.error('Load waylines error:', error)
-        // 使用模拟数据
-        this.waylines = [
-          { id: 1, name: '电力巡检航线一', estimated_duration: 300 },
-          { id: 2, name: '桥梁检测航线', estimated_duration: 180 },
-          { id: 3, name: '河道巡查航线', estimated_duration: 420 }
-        ]
-        
-        if (this.waylines.length > 0 && !this.currentSelectedId) {
-          this.$emit('wayline-selected', this.waylines[0])
-        }
-      } finally {
-        this.loading = false
+        this.waylineTree = list.length ? [{
+          type: 'all',
+          label: '全部航线',
+          count: list.length,
+          items: list
+        }] : []
+        this.ensureDefaultExpand()
+        this.autoSelectFirstIfNeeded()
+      } catch (e) {
+        console.error('加载航线列表失败:', e)
+        this.waylineTree = []
       }
     },
     
@@ -95,6 +137,36 @@ export default {
       const minutes = Math.floor(seconds / 60)
       const secs = seconds % 60
       return `${minutes}:${secs.toString().padStart(2, '0')}`
+    },
+    formatRecent(ts) {
+      const date = new Date(ts)
+      const now = new Date()
+      const diff = Math.floor((now - date) / 1000)
+      if (diff < 60) return '刚刚'
+      if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
+      if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
+      return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+    },
+    ensureDefaultExpand() {
+      this.expandedMap = this.expandedMap || {}
+      this.waylineTree.forEach(g => {
+        if (this.expandedMap[g.type] === undefined) {
+          this.expandedMap[g.type] = true
+        }
+      })
+    },
+    toggleGroup(type) {
+      this.expandedMap = this.expandedMap || {}
+      this.expandedMap[type] = !this.expandedMap[type]
+    },
+    autoSelectFirstIfNeeded() {
+      if (!this.currentSelectedId) {
+        const firstGroup = this.waylineTree[0]
+        const firstItem = firstGroup && Array.isArray(firstGroup.items) ? firstGroup.items[0] : null
+        if (firstItem) {
+          this.$emit('wayline-selected', firstItem)
+        }
+      }
     }
   }
 }
@@ -146,6 +218,37 @@ export default {
   max-height: 400px;
   overflow-y: auto;
   padding: 12px;
+}
+/* 树分组样式 */
+.tree-group {
+  margin-bottom: 10px;
+}
+.tree-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(0, 212, 255, 0.08);
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  border-radius: 8px;
+  cursor: pointer;
+  color: #e2e8f0;
+}
+.group-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+.group-count {
+  color: #94a3b8;
+  font-size: 12px;
+}
+.toggle-icon {
+  margin-left: auto;
+  color: #64b5f6;
+  font-size: 12px;
+}
+.tree-items {
+  padding: 8px 2px 2px;
 }
 
 /* 自定义滚动条 */
@@ -269,6 +372,11 @@ export default {
   font-weight: 600;
   color: #e2e8f0;
   line-height: 1.4;
+}
+.recent-meta {
+  margin-left: 6px;
+  font-size: 12px;
+  color: #94a3b8;
 }
 
 .wayline-item.selected .wayline-name {

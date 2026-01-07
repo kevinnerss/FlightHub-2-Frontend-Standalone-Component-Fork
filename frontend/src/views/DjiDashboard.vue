@@ -120,12 +120,26 @@
 
         <!-- 实时监控面板（直播流播放器） -->
         <div class="panel-section live-monitor-section">
-          <LiveStreamPlayer 
-            stream-id="drone01"
-            stream-name="保护区实时监控"
-            :zlm-server="zlmServerUrl"
-            :auto-play="true"
-          />
+          <div class="monitor-header">
+            <span class="monitor-title">实时直播</span>
+            <div class="stream-selector-wrapper">
+              <select v-model="selectedStreamId" class="stream-selector">
+                <option v-for="stream in liveStreams" :key="stream.id" :value="stream.id">
+                  {{ stream.name }}
+                </option>
+              </select>
+            </div>
+          </div>
+          <div class="live-player-wrapper">
+            <LiveStreamPlayer 
+              v-if="currentStream"
+              :key="currentStream.id"
+              :stream-id="currentStream.id"
+              :stream-name="currentStream.name"
+              :zlm-server="zlmServerUrl"
+              :auto-play="true"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -185,7 +199,9 @@ import AlarmPanel from '../components/AlarmPanel.vue'
 import WaylineFallback from '../components/WaylineFallback.vue'
 import LiveStreamPlayer from '../components/LiveStreamPlayer.vue'
 import alarmApi from '../api/alarmApi.js'
+import waylineApi from '../api/waylineApi.js'
 import componentConfigApi from '../api/componentConfigApi.js'
+import inspectTaskApi from '../api/inspectTaskApi.js'
 
 export default {
   name: 'DjiDashboard',
@@ -226,11 +242,27 @@ export default {
       currentAlarm: null,
       fh2CheckTimer: null,
       componentConfig: null,
-      zlmServerUrl: 'http://192.168.10.10'
+      zlmServerUrl: 'http://192.168.10.10',
+      liveStreams: [
+        { id: 'dock01', name: '1号机场' },
+        { id: 'drone01', name: '1号无人机' },
+        { id: 'dock02', name: '2号机场' },
+        { id: 'drone02', name: '2号无人机' }
+      ],
+      selectedStreamId: 'dock01',
+      actionDetails: [],
+      actionDetailEntities: [],
+      taskPollTimer: null
+    }
+  },
+  computed: {
+    currentStream() {
+      return this.liveStreams.find(s => s.id === this.selectedStreamId)
     }
   },
   mounted() {
     this.checkFh2Availability()
+    this.initSelectedWaylineFromRoute()
     // 等待DOM完全渲染后再初始化Cesium
     this.$nextTick(() => {
       // 使用setTimeout确保布局计算完成
@@ -370,6 +402,7 @@ export default {
       this.selectedWayline = wayline
       this.fetchAlarmsByWayline(wayline.id)
       this.ensureWaylineWithPoints(wayline)
+      this.fetchActionDetails(wayline.id)
     },
 
     async loadComponentConfig() {
@@ -437,7 +470,7 @@ export default {
       
       this.loadingAlarms = true
       try {
-        const response = await alarmApi.getAlarms({ wayline_id: waylineId })
+        const response = await alarmApi.getAlarms({ wayline: waylineId })
         this.alarms = Array.isArray(response) ? response : (response.results || [])
         this.plotAlarmMarkers(this.alarms)
       } catch (error) {
@@ -461,6 +494,119 @@ export default {
       if (this.alarms.length) {
         this.plotAlarmMarkers(this.alarms)
       }
+    },
+    
+    startTaskPolling() {
+      this.fetchCurrentTask()
+      this.taskPollTimer = setInterval(() => {
+        this.fetchCurrentTask()
+      }, 3000)
+    },
+
+    async fetchCurrentTask() {
+      try {
+        // 1. 优先获取正在进行的任务
+        let response = await inspectTaskApi.getInspectTasks({
+          detect_status__in: 'scanning,processing',
+          ordering: '-updated_at',
+          limit: 1
+        })
+        
+        let tasks = response.results || response.data || []
+        
+        // 2. 如果没有正在进行的任务，获取最近的一个任务
+        if (tasks.length === 0) {
+          response = await inspectTaskApi.getInspectTasks({
+            ordering: '-created_at',
+            limit: 1
+          })
+          tasks = response.results || response.data || []
+        }
+
+        if (tasks.length > 0) {
+          const task = tasks[0]
+          this.currentTask = task.external_task_id || task.dji_task_name || '未命名任务'
+          this.totalTasks = task.total_images || 0
+          this.completedTasks = task.completed_images || 0
+          
+          if (this.totalTasks > 0) {
+            this.taskProgress = Math.round((this.completedTasks / this.totalTasks) * 100)
+          } else {
+            this.taskProgress = 0
+          }
+        }
+      } catch (error) {
+        console.error('获取当前任务失败:', error)
+      }
+    },
+    
+    async initSelectedWaylineFromRoute() {
+      try {
+        const id = this.$route?.query?.wayline_id
+        if (!id) return
+        const detail = await alarmApi.getWaylineDetail(id)
+        if (detail && detail.id) {
+          this.selectedWayline = detail
+          this.fetchAlarmsByWayline(detail.id)
+          this.ensureWaylineWithPoints(detail)
+          this.fetchActionDetails(detail.id)
+        }
+      } catch (e) {
+        console.warn('根据路由初始化航线失败', e)
+      }
+    },
+    async fetchActionDetails(waylineId) {
+      try {
+        const res = await waylineApi.getWaylineActionDetails(waylineId)
+        this.actionDetails = Array.isArray(res?.action_details) ? res.action_details : []
+        this.plotActionDetailMarkers(this.actionDetails)
+      } catch (e) {
+        console.warn('获取航线动作详情失败', e)
+        this.actionDetails = []
+        this.clearActionDetailMarkers()
+      }
+    },
+    plotActionDetailMarkers(details) {
+      if (!this.viewer) return
+      const Cesium = this.cesiumLib || window.Cesium
+      if (!Cesium) return
+      this.clearActionDetailMarkers()
+      const entities = []
+      details.forEach(d => {
+        const lat = Number(d.lat)
+        const lon = Number(d.lon)
+        const h = Number(d.height || 0)
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return
+        const position = Cesium.Cartesian3.fromDegrees(lon, lat, h)
+        const entity = this.viewer.entities.add({
+          position,
+          point: {
+            pixelSize: 8,
+            color: Cesium.Color.CYAN.withAlpha(0.9),
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 1,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
+          },
+          label: {
+            text: d.uuid ? d.uuid.slice(0, 8) : 'action',
+            font: '12px sans-serif',
+            fillColor: Cesium.Color.WHITE,
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 2,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            pixelOffset: new Cesium.Cartesian2(0, -20),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
+          }
+        })
+        entities.push(entity)
+      })
+      this.actionDetailEntities = entities
+    },
+    clearActionDetailMarkers() {
+      if (this.viewer && this.actionDetailEntities.length) {
+        this.actionDetailEntities.forEach(e => this.viewer.entities.remove(e))
+      }
+      this.actionDetailEntities = []
     },
 
     handleLocateAlarm(alarm) {
@@ -1194,6 +1340,55 @@ export default {
 .live-monitor-section .panel-body {
   padding: 0;
 }
+
+.monitor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: rgba(0, 212, 255, 0.05);
+  border-bottom: 1px solid rgba(0, 212, 255, 0.1);
+}
+
+.monitor-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #00d4ff;
+}
+
+.stream-selector-wrapper {
+  position: relative;
+}
+
+.stream-selector {
+  background: rgba(11, 16, 36, 0.8);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  color: #e2e8f0;
+  padding: 4px 24px 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+  appearance: none; /* 移除默认箭头 */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2300d4ff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  background-size: 14px;
+}
+
+.stream-selector:focus {
+  border-color: #00d4ff;
+  box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.1);
+}
+
+.live-player-wrapper {
+  flex: 1;
+  overflow: hidden;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+}
+
 
 @media (max-width: 1180px) {
   .dashboard-content {

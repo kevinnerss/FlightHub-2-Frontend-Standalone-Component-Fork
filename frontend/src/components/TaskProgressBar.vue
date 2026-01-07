@@ -22,14 +22,11 @@
       <div class="progress-text">{{ progress }}%</div>
     </div>
     
-    <!-- 进度指示器 -->
-    <div class="progress-indicators">
-      <div 
-        v-for="index in totalTasks" 
-        :key="index" 
-        class="indicator" 
-        :class="{ completed: index <= completedTasks, active: index === completedTasks + 1 }"
-      />
+    <!-- 进度计数 -->
+    <div class="progress-count-display">
+      <span class="count-number">{{ Math.min(completedTasks + 1, totalTasks) }}</span>
+      <span class="count-separator">/</span>
+      <span class="count-total">{{ totalTasks }}</span>
     </div>
   </div>
 </template>
@@ -187,43 +184,33 @@ export default {
   pointer-events: none;
 }
 
-/* 进度指示器 */
-.progress-indicators {
+/* 进度计数 */
+.progress-count-display {
   display: flex;
-  gap: 6px;
+  align-items: baseline;
   justify-content: center;
+  gap: 4px;
+  margin-top: 8px;
 }
 
-.indicator {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: rgba(100, 116, 139, 0.3);
-  border: 1px solid rgba(100, 116, 139, 0.5);
-  transition: all 0.3s ease;
+.count-number {
+  font-size: 24px;
+  font-weight: 700;
+  color: #00d4ff;
+  font-family: 'DIN Alternate', 'Courier New', sans-serif;
+  text-shadow: 0 0 10px rgba(0, 212, 255, 0.4);
 }
 
-.indicator.completed {
-  background: linear-gradient(135deg, #00d4ff 0%, #0099ff 100%);
-  border-color: #00d4ff;
-  box-shadow: 0 0 8px rgba(0, 212, 255, 0.6);
+.count-separator {
+  font-size: 16px;
+  color: #64748b;
+  margin: 0 2px;
 }
 
-.indicator.active {
-  background: linear-gradient(135deg, #00d4ff 0%, #0099ff 100%);
-  border-color: #00d4ff;
-  box-shadow: 0 0 12px rgba(0, 212, 255, 0.8);
-  animation: activePulse 1.5s ease-in-out infinite;
-  transform: scale(1.3);
-}
-
-@keyframes activePulse {
-  0%, 100% {
-    box-shadow: 0 0 12px rgba(0, 212, 255, 0.8);
-  }
-  50% {
-    box-shadow: 0 0 20px rgba(0, 212, 255, 1);
-  }
+.count-total {
+  font-size: 16px;
+  color: #94a3b8;
+  font-weight: 600;
 }
 
 /* 响应式 */
