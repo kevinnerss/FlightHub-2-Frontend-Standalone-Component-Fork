@@ -24,21 +24,21 @@
       <div class="detect-type-table-wrap">
         <table class="detect-type-table">
           <thead>
-            <tr>
-              <th>类型</th>
-              <th>英文</th>
-              <th>关键字</th>
-            </tr>
+          <tr>
+            <th>类型</th>
+            <th>英文</th>
+            <th>关键字</th>
+          </tr>
           </thead>
           <tbody>
-            <tr v-for="t in detectTypes" :key="t.code">
-              <td class="type-cell">
-                <span class="type-icon">{{ t.icon }}</span>
-                <span class="type-name">{{ t.name }}</span>
-              </td>
-              <td class="code-cell">{{ t.code }}</td>
-              <td class="keywords-cell">{{ t.keywords }}</td>
-            </tr>
+          <tr v-for="t in detectTypes" :key="t.code">
+            <td class="type-cell">
+              <span class="type-icon">{{ t.icon }}</span>
+              <span class="type-name">{{ t.name }}</span>
+            </td>
+            <td class="code-cell">{{ t.code }}</td>
+            <td class="keywords-cell">{{ t.keywords }}</td>
+          </tr>
           </tbody>
         </table>
       </div>
@@ -48,11 +48,10 @@
     <div class="dashboard-content">
       <!-- 左侧面板 - 航线管理 -->
       <div class="side-panel left-panel">
-
         <div class="panel-body compact-panel">
-          <WaylineFallback 
-            :current-selected-id="selectedWayline?.id"
-            @wayline-selected="handleWaylineSelected"
+          <WaylineFallback
+              :current-selected-id="selectedWayline?.id"
+              @wayline-selected="handleWaylineSelected"
           />
         </div>
       </div>
@@ -61,12 +60,12 @@
       <div class="main-view">
         <!-- 任务进度条 -->
         <div class="progress-section">
-          <TaskProgressBar 
-            :progress="taskProgress"
-            :current-task="currentTask"
-            :remaining-time="remainingTime"
-            :completed-tasks="completedTasks"
-            :total-tasks="totalTasks"
+          <TaskProgressBar
+              :progress="taskProgress"
+              :current-task="currentTask"
+              :remaining-time="remainingTime"
+              :completed-tasks="completedTasks"
+              :total-tasks="totalTasks"
           />
         </div>
 
@@ -103,14 +102,14 @@
         <!-- 告警信息面板 -->
         <div class="panel-section">
           <div class="panel-body alarm-panel-body">
-            <AlarmPanel 
-              v-if="selectedWayline"
-              :alarms="getFilteredAlarms()"
-              :loading="loadingAlarms"
-              @refresh="handleAlarmRefresh"
-              @view-detail="handleViewAlarmDetail"
-              @process-alarm="handleProcessAlarm"
-              @locate-alarm="handleLocateAlarm"
+            <AlarmPanel
+                v-if="selectedWayline"
+                :alarms="getFilteredAlarms()"
+                :loading="loadingAlarms"
+                @refresh="handleAlarmRefresh"
+                @view-detail="handleViewAlarmDetail"
+                @process-alarm="handleProcessAlarm"
+                @locate-alarm="handleLocateAlarm"
             />
             <div v-else class="dji-placeholder">
               <p>请先选择航线查看告警信息</p>
@@ -131,13 +130,13 @@
             </div>
           </div>
           <div class="live-player-wrapper">
-            <LiveStreamPlayer 
-              v-if="currentStream"
-              :key="currentStream.id"
-              :stream-id="currentStream.id"
-              :stream-name="currentStream.name"
-              :zlm-server="zlmServerUrl"
-              :auto-play="true"
+            <LiveStreamPlayer
+                v-if="currentStream"
+                :key="currentStream.id"
+                :stream-id="currentStream.id"
+                :stream-name="currentStream.name"
+                :zlm-server="zlmServerUrl"
+                :auto-play="true"
             />
           </div>
         </div>
@@ -224,17 +223,11 @@ export default {
       remainingTime: '12:45',
       completedTasks: 8,
       totalTasks: 12,
-      cesiumLib: null,
-      viewer: null,
-      tileset: null,
       loading: false,
       error: '',
       globeVisible: true,
       imageryProviderType: 'aerial',
       fh2Loaded: false,
-      waylineEntity: null,
-      alarmEntities: [],
-      pickHandler: null,
       selectedWayline: null,
       alarms: [],
       loadingAlarms: false,
@@ -251,8 +244,8 @@ export default {
       ],
       selectedStreamId: 'dock01',
       actionDetails: [],
-      actionDetailEntities: [],
-      taskPollTimer: null
+      taskPollTimer: null,
+      chaseCameraListener: null
     }
   },
   computed: {
@@ -260,12 +253,20 @@ export default {
       return this.liveStreams.find(s => s.id === this.selectedStreamId)
     }
   },
+  created() {
+    this.cesiumLib = null
+    this.viewer = null
+    this.tileset = null
+    this.waylineEntity = null
+    this.droneEntity = null
+    this.alarmEntities = []
+    this.actionDetailEntities = []
+    this.pickHandler = null
+  },
   mounted() {
     this.checkFh2Availability()
     this.initSelectedWaylineFromRoute()
-    // 等待DOM完全渲染后再初始化Cesium
     this.$nextTick(() => {
-      // 使用setTimeout确保布局计算完成
       setTimeout(async () => {
         await this.loadComponentConfig()
         this.initCesium()
@@ -276,6 +277,9 @@ export default {
     if (this.fh2CheckTimer) {
       clearTimeout(this.fh2CheckTimer)
       this.fh2CheckTimer = null
+    }
+    if (this.viewer && this.chaseCameraListener) {
+      this.viewer.scene.postUpdate.removeEventListener(this.chaseCameraListener)
     }
     if (this.viewer) {
       this.viewer.destroy()
@@ -293,7 +297,6 @@ export default {
         this.fh2CheckTimer = null
         return
       }
-
       this.fh2Loaded = false
       this.fh2CheckTimer = setTimeout(() => {
         this.checkFh2Availability()
@@ -312,23 +315,11 @@ export default {
             tokenFromConfig || process.env.VUE_APP_CESIUM_ION_TOKEN || Cesium.Ion.defaultAccessToken || ''
 
         const container = this.$refs.cesiumContainer
-        if (!container) {
-          throw new Error('找不到 Cesium 容器')
-        }
+        if (!container) throw new Error('找不到 Cesium 容器')
 
-        const rect = container.getBoundingClientRect()
-        if (rect.width === 0 || rect.height === 0) {
-          throw new Error(`容器尺寸异常: ${rect.width}x${rect.height}`)
-        }
-
-        // 直接在ref容器上创建Cesium Viewer
         this.viewer = new Cesium.Viewer(container, {
-          // --- 核心修改开始 ---
-          sceneMode: Cesium.SceneMode.COLUMBUS_VIEW, // 1. 切换到哥伦布视图（平面模式）
-          mapMode2D: Cesium.MapMode2D.ROTATE,        // 2. 允许在平面模式下旋转
-          scene3DOnly: false,                        // 3. 【关键】必须设为 false 或删除，否则无法使用平面模式
-          // --- 核心修改结束 ---
-
+          sceneMode: Cesium.SceneMode.SCENE3D,
+          scene3DOnly: true,
           animation: false,
           baseLayerPicker: false,
           fullscreenButton: false,
@@ -343,53 +334,39 @@ export default {
           creditContainer: document.createElement('div')
         })
 
+        this.viewer.scene.globe.depthTestAgainstTerrain = false;
+        this.viewer.scene.screenSpaceCameraController.enableCollisionDetection = false;
+
         this.viewer.scene.globe.show = this.globeVisible
         await this.setupImageryLayers(Cesium)
         this.tuneCameraControls(this.viewer.scene.screenSpaceCameraController)
         this.setupPickHandler(Cesium)
 
-        // 强制resize确保canvas正确渲染
         this.viewer.resize()
         const centerLon = 116.39;
         const centerLat = 39.90;
 
         this.viewer.camera.setView({
-          // 高度设为 3000-5000 米，确保在你的 14-18 级范围内
           destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, 4000),
           orientation: {
             heading: 0,
-            pitch: Cesium.Math.toRadians(-90), // 垂直向下看
+            pitch: Cesium.Math.toRadians(-90),
             roll: 0
           }
         });
-        // 加载3D Tiles模型
+
         try {
           this.tileset = await Cesium.Cesium3DTileset.fromUrl('/models/site_model/3dtiles/tileset.json')
           this.viewer.scene.primitives.add(this.tileset)
-
-          // 等待tileset加载完成
           await this.tileset.readyPromise
-
-          // 自动缩放到模型并调整视角
           await this.viewer.zoomTo(this.tileset, new Cesium.HeadingPitchRange(
-              0, // heading (朝向)
-              Cesium.Math.toRadians(-30), // pitch (俯仰角，负数向下)
-              this.tileset.boundingSphere.radius * 2.5 // range (距离)
+              0,
+              Cesium.Math.toRadians(-30),
+              this.tileset.boundingSphere.radius * 2.5
           ))
-
-          // 再次resize确保显示正确
           this.viewer.resize()
         } catch (tilesetError) {
           console.error('加载3D Tiles模型失败:', tilesetError)
-          // 如果模型加载失败，设置默认相机位置
-          this.viewer.camera.setView({
-            destination: Cesium.Cartesian3.fromDegrees(116.3913, 39.9075, 1000),
-            orientation: {
-              heading: Cesium.Math.toRadians(0),
-              pitch: Cesium.Math.toRadians(-30),
-              roll: 0.0
-            }
-          })
         }
       } catch (err) {
         this.error = '初始化Cesium失败: ' + err.message
@@ -398,186 +375,764 @@ export default {
         this.loading = false
       }
     },
-    handleWaylineSelected(wayline) {
-      this.selectedWayline = wayline
-      this.fetchAlarmsByWayline(wayline.id)
-      this.ensureWaylineWithPoints(wayline)
-      this.fetchActionDetails(wayline.id)
+
+    async handleWaylineSelected(wayline) {
+      console.log('[Dashboard] 用户点击航线:', wayline?.name, wayline?.id);
+      this.selectedWayline = wayline;
+
+      // 1. 先加载告警
+      this.fetchAlarmsByWayline(wayline.id);
+
+      // 2. 【关键修改】先去获取那些“能显示的蓝点数据”
+      let validPoints = [];
+      try {
+        const res = await waylineApi.getWaylineActionDetails(wayline.id);
+        // 保存到 data 中用于画蓝点
+        this.actionDetails = Array.isArray(res?.action_details) ? res.action_details : [];
+        validPoints = this.actionDetails;
+
+        // 画蓝点 (你之前能看到的部分)
+        this.plotActionDetailMarkers(this.actionDetails);
+        console.log('[Debug] 成功获取动作详情点，数量:', validPoints.length);
+      } catch (e) {
+        console.warn('[Debug] 获取动作详情失败', e);
+      }
+
+      // 3. 【关键修改】把获取到的蓝点数据，强行传给画线函数作为备用数据源
+      // 第三个参数 true 表示：如果主接口没数据，就强制使用传入的 validPoints
+      await this.ensureWaylineWithPoints(wayline, validPoints);
+    },
+
+// 核心数据解析：增加去重逻辑，防止 NaN
+// 修改函数签名，增加 fallbackData 参数
+    async ensureWaylineWithPoints(wayline, fallbackData = []) {
+      console.log('----------------------------------------------------');
+      console.log('[Debug] 开始构建航线，WaylineID:', wayline?.id);
+
+      let finalWayline = { ...wayline };
+      let sourceList = [];
+
+      // 1. 尝试从 API 获取详情 (原来的逻辑)
+      try {
+        const res = await alarmApi.getWaylineDetail(wayline.id);
+        const data = res.data || res;
+
+        if (data && Array.isArray(data.action_details) && data.action_details.length > 0) {
+          sourceList = data.action_details;
+          console.log('[Debug] 来源: alarmApi 详情接口 (数量: ' + sourceList.length + ')');
+        }
+      } catch (e) {
+        console.warn('[Debug] alarmApi 接口调用失败，尝试使用备用数据');
+      }
+
+      // 2. 【核心修复】如果主接口没拿到数据，使用传入的 fallbackData (即蓝点数据)
+      if (sourceList.length === 0 && fallbackData.length > 0) {
+        console.log('[Debug] 来源: 使用备用 fallbackData (蓝点数据) 修复航线, 数量:', fallbackData.length);
+        sourceList = fallbackData;
+      }
+
+      // 3. 如果还是空的，那就彻底没戏了
+      if (sourceList.length === 0) {
+        console.error('[Error] 依然没有数据。请检查控制台网络请求，确认后端返回的 JSON。');
+        // 打印一个 alert 方便你在界面上直接看到
+        alert(`航线 ID ${wayline.id} 没有坐标数据，无法飞行。`);
+        return;
+      }
+
+      // 4. 解析数据 (打印第一条数据，帮你确认字段名)
+      console.log('[Debug] 准备解析的第一条数据样本:', JSON.stringify(sourceList[0]));
+
+      const mappedPoints = [];
+      sourceList.forEach((p, i) => {
+        // 暴力匹配所有可能的字段名
+        const lon = Number(p.lon || p.longitude || p.long || p.x);
+        const lat = Number(p.lat || p.latitude || p.y);
+        // 高度默认 100
+        const alt = Number(p.height || p.altitude || p.ellipsoid_height || p.z || 100);
+
+        if (Number.isFinite(lon) && Number.isFinite(lat)) {
+          mappedPoints.push({
+            longitude: lon,
+            latitude: lat,
+            altitude: alt + 50, // 抬高一点
+            heading: Number(p.aircraft_heading || p.heading || 0),
+            gimbalPitch: Number(p.gimbal_pitch || 0)
+          });
+        } else {
+          if (i === 0) console.warn('[Debug] 第一条数据解析失败，字段不匹配:', p);
+        }
+      });
+
+      console.log(`[Debug] 解析完成，有效坐标点: ${mappedPoints.length} 个`);
+
+      if (mappedPoints.length > 1) {
+        finalWayline.waypoints = mappedPoints;
+        // 确保 Vue 响应式更新
+        this.selectedWayline = finalWayline;
+
+        // 延迟执行绘制，确保 DOM/Viewer 稳定
+        setTimeout(() => {
+          this.drawWaylineOnMap(finalWayline);
+          this.startFlightSimulation(finalWayline);
+        }, 200);
+      } else {
+        alert('解析后有效点数不足 2 个，无法连线');
+      }
+    },
+    drawWaylineOnMap(wayline) {
+      if (!this.viewer || !wayline?.waypoints?.length) return;
+      const Cesium = this.cesiumLib || window.Cesium;
+
+      // 清理旧实体
+      if (this.waylineEntity) {
+        this.viewer.entities.remove(this.waylineEntity);
+        this.waylineEntity = null;
+      }
+
+      // 1. 提取坐标
+      const positions = wayline.waypoints.map(p =>
+          Cesium.Cartesian3.fromDegrees(p.longitude, p.latitude, p.altitude)
+      );
+
+      // 2. 绘制航线 (使用纯色，确保可见性)
+      this.waylineEntity = this.viewer.entities.add({
+        name: wayline.name || '航线',
+        polyline: {
+          positions: positions,
+          width: 5, // 稍微调细一点，太宽有时候会穿模
+          // 暂时不用 PolylineGlowMaterialProperty，改用纯色排查问题
+          material: Cesium.Color.YELLOW.withAlpha(0.8),
+          clampToGround: false,
+          // 增加深度检测失败时的颜色（被地形挡住时显示红色）
+          depthFailMaterial: Cesium.Color.RED
+        }
+      });
+
+      // 3. 绘制航点（保持原样，这部分你已经能看到了）
+      positions.forEach((pos) => {
+        this.viewer.entities.add({
+          position: pos,
+          point: {
+            pixelSize: 8,
+            color: Cesium.Color.RED,
+            outlineColor: Cesium.Color.WHITE,
+            outlineWidth: 2,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY // 确保点永远在最上层
+          }
+        });
+      });
+
+      // 4. 视角飞向整个航线范围
+      const sphere = Cesium.BoundingSphere.fromPoints(positions);
+      this.viewer.camera.flyToBoundingSphere(sphere, {
+        duration: 1.0,
+        offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-30), sphere.radius * 2.5)
+      });
+    },
+
+    // 安全的计算朝向函数，处理重合点
+    calculateHeading(p1, p2) {
+      const Cesium = this.cesiumLib || window.Cesium;
+      // 如果点太近，直接返回 0，防止数学错误
+      if (Cesium.Cartesian3.distance(p1, p2) < 1.0) {
+        return 0;
+      }
+
+      // 建立局部坐标系 ENU (East-North-Up)
+      const transform = Cesium.Transforms.eastNorthUpToFixedFrame(p1);
+      const invTransform = Cesium.Matrix4.inverse(transform, new Cesium.Matrix4());
+
+      // 将 p2 转到 p1 的局部坐标系
+      const p2Local = Cesium.Matrix4.multiplyByPoint(invTransform, p2, new Cesium.Cartesian3());
+
+      // 计算角度: atan2(y, x) 是相对东方向的逆时针角度
+      // Cesium Heading 是相对北方向的顺时针角度
+      // 数学转换:
+      // East(X) -> 0 rad (Math) -> 90 deg (Cesium)
+      // North(Y) -> 90 deg (Math) -> 0 deg (Cesium)
+      // 简易公式: angle = atan2(x, y) (注意 x,y 顺序与标准 atan2 相反) 即可得到顺时针相对Y轴的角度吗？
+      // Cesium 标准做法：
+      let angle = Math.atan2(p2Local.y, p2Local.x);
+      // angle 是与X轴(东)的夹角。
+      // 我们需要 Heading (与北的夹角)。
+      // Heading = 90度 - angle (弧度制: PI/2 - angle)
+      let heading = Cesium.Math.PI_OVER_TWO - angle;
+
+      return heading;
+    },
+    startFlightSimulation(wayline) {
+      const Cesium = this.cesiumLib || window.Cesium;
+      if (!this.viewer || !wayline?.waypoints?.length) return;
+
+      // 1. 清理工作
+      if (this.droneEntity) {
+        this.viewer.entities.remove(this.droneEntity);
+        this.droneEntity = null;
+      }
+      if (this.chaseCameraListener) {
+        this.viewer.scene.postUpdate.removeEventListener(this.chaseCameraListener);
+        this.chaseCameraListener = null;
+      }
+
+      // ----------------------------------------------------------------
+      // 【步骤 1】数据分组 (Grouping)
+      // 将连续坐标相同的点，归纳为一个 "Group" (站点)
+      // ----------------------------------------------------------------
+      const groups = [];
+      let currentGroup = null;
+
+      wayline.waypoints.forEach((pt) => {
+        // 第一次循环，或者发现新点距离很远，就创建新组
+        const isNewLocation = !currentGroup ||
+            (Math.abs(pt.latitude - currentGroup.lat) > 0.0000001 ||
+                Math.abs(pt.longitude - currentGroup.lon) > 0.0000001);
+
+        if (isNewLocation) {
+          // 开启一个新站点
+          currentGroup = {
+            lat: pt.latitude,
+            lon: pt.longitude,
+            alt: pt.altitude,
+            // 记录该位置下所有的动作点数据
+            actions: [pt]
+          };
+          groups.push(currentGroup);
+        } else {
+          // 还是在老地方，只是角度不一样，加入当前站点
+          currentGroup.actions.push(pt);
+        }
+      });
+
+      console.log(`[Debug] 原始动作点: ${wayline.waypoints.length} -> 合并为站点: ${groups.length} 个`);
+
+      // 2. 初始化属性
+      const positionProp = new Cesium.SampledPositionProperty();
+      const orientationProp = new Cesium.SampledProperty(Cesium.Quaternion);
+      const cameraOffsetProp = new Cesium.SampledProperty(Cesium.Cartesian3);
+
+      positionProp.setInterpolationOptions({ interpolationDegree: 1, interpolationAlgorithm: Cesium.LinearApproximation });
+      orientationProp.setInterpolationOptions({ interpolationDegree: 1, interpolationAlgorithm: Cesium.LinearApproximation });
+      cameraOffsetProp.setInterpolationOptions({ interpolationDegree: 1, interpolationAlgorithm: Cesium.LinearApproximation });
+
+      // 3. 配置参数
+      const flySpeed = 2; // 飞行速度
+      const modelHeadingOffset = Cesium.Math.toRadians(-90); // 模型修正
+
+      // 视角配置
+      const offsetFar = new Cesium.Cartesian3(-8, 0, 3); // 第三人称
+      const offsetNear = new Cesium.Cartesian3(2, 0, 0);   // 特写
+
+      // 4. 构建时间轴
+      const startJulian = Cesium.JulianDate.now();
+      let currentTime = startJulian.clone();
+
+      // ==========================================
+      // 【步骤 2】外层循环：遍历物理站点 (Groups)
+      // ==========================================
+      for (let i = 0; i < groups.length; i++) {
+        const group = groups[i];
+        const nextGroup = groups[i + 1]; // 下一个物理站点
+
+        // 当前站点的固定坐标
+        const pos = Cesium.Cartesian3.fromDegrees(group.lon, group.lat, group.alt);
+
+        // A. 计算【飞行航向】 (Fly Heading) - 用于到达和离开
+        let flyHeading = 0;
+        if (nextGroup) {
+          const nextPos = Cesium.Cartesian3.fromDegrees(nextGroup.lon, nextGroup.lat, nextGroup.alt);
+          flyHeading = this.calculateHeading(pos, nextPos);
+        } else {
+          // 最后一个点，沿用上一次
+          flyHeading = this._lastFlyHeading || 0;
+        }
+        this._lastFlyHeading = flyHeading; // 暂存
+
+        const quatFly = Cesium.Transforms.headingPitchRollQuaternion(
+            pos,
+            new Cesium.HeadingPitchRoll(flyHeading + modelHeadingOffset, 0, 0)
+        );
+
+        // ----------------------------------------
+        // 阶段 0: 到达站点 (Arrive)
+        // ----------------------------------------
+        // 如果是第一个点，初始化状态；如果是后续点，这里是飞过来的终点
+        positionProp.addSample(currentTime, pos);
+        orientationProp.addSample(currentTime, quatFly); // 保持飞行姿态到达
+        cameraOffsetProp.addSample(currentTime, offsetFar);
+
+        // ==========================================
+        // 【步骤 3】内层循环：遍历该站点的所有动作
+        // ==========================================
+        for (let j = 0; j < group.actions.length; j++) {
+          const actionPt = group.actions[j];
+
+          // 1. 计算当前动作的拍摄角度
+          let aircraftHeadingInfo = Number(actionPt.aircraft_heading || actionPt.gimbal_yaw || 0);
+          // 转换角度 (根据你的模型朝向微调，这里假设是 -90 修正)
+          let shootHeading = Cesium.Math.toRadians(-aircraftHeadingInfo) + modelHeadingOffset;
+
+          const quatShoot = Cesium.Transforms.headingPitchRollQuaternion(
+              pos,
+              new Cesium.HeadingPitchRoll(shootHeading, 0, 0)
+          );
+
+          // 动作 A: 转头 (Rotate)
+          // 无论之前是刚飞过来(quatFly)，还是刚做完上一个动作(prevQuatShoot)，都花 1.5s 转到当前角度
+          currentTime = Cesium.JulianDate.addSeconds(currentTime, 1.5, new Cesium.JulianDate());
+          positionProp.addSample(currentTime, pos);
+          orientationProp.addSample(currentTime, quatShoot); // 【转头】
+          cameraOffsetProp.addSample(currentTime, offsetFar);
+
+          // 动作 B: 放大 (Zoom In)
+          currentTime = Cesium.JulianDate.addSeconds(currentTime, 1.5, new Cesium.JulianDate());
+          positionProp.addSample(currentTime, pos);
+          orientationProp.addSample(currentTime, quatShoot);
+          cameraOffsetProp.addSample(currentTime, offsetNear); // 【放大】
+
+          // 动作 C: 保持 (Hold)
+          currentTime = Cesium.JulianDate.addSeconds(currentTime, 2.0, new Cesium.JulianDate());
+          positionProp.addSample(currentTime, pos);
+          orientationProp.addSample(currentTime, quatShoot);
+          cameraOffsetProp.addSample(currentTime, offsetNear);
+
+          // 动作 D: 缩小 (Zoom Out)
+          currentTime = Cesium.JulianDate.addSeconds(currentTime, 1.5, new Cesium.JulianDate());
+          positionProp.addSample(currentTime, pos);
+          orientationProp.addSample(currentTime, quatShoot);
+          cameraOffsetProp.addSample(currentTime, offsetFar); // 【缩小】
+
+          // 【关键逻辑】
+          // 如果这还不是本站点的最后一个动作 (j < length - 1)
+          // 那么 loops 回去，直接开始下一个动作的 "Rotate"，不进行回正！
+        }
+
+        // ----------------------------------------
+        // 阶段 End: 离开站点前，回正 (Reset Heading)
+        // 只有当所有动作做完，且还有下一个站点要飞时，才回正
+        // ----------------------------------------
+        if (nextGroup) {
+          // 回正耗时 1秒
+          currentTime = Cesium.JulianDate.addSeconds(currentTime, 1.0, new Cesium.JulianDate());
+          positionProp.addSample(currentTime, pos);
+          orientationProp.addSample(currentTime, quatFly); // 【回正到飞行方向】
+          cameraOffsetProp.addSample(currentTime, offsetFar);
+
+          // 飞行过程 (Travel)
+          const nextPos = Cesium.Cartesian3.fromDegrees(nextGroup.lon, nextGroup.lat, nextGroup.alt);
+          const distance = Cesium.Cartesian3.distance(pos, nextPos);
+          const duration = Math.max(distance / flySpeed, 0.1);
+
+          currentTime = Cesium.JulianDate.addSeconds(currentTime, duration, new Cesium.JulianDate());
+        }
+      }
+
+      // 5. 实体创建 (保持不变)
+      const stopJulian = currentTime.clone();
+      const availability = new Cesium.TimeIntervalCollection([
+        new Cesium.TimeInterval({
+          start: Cesium.JulianDate.addSeconds(startJulian, -3600, new Cesium.JulianDate()),
+          stop: Cesium.JulianDate.addSeconds(stopJulian, 3600, new Cesium.JulianDate())
+        })
+      ]);
+
+      this.droneEntity = this.viewer.entities.add({
+        availability: availability,
+        position: positionProp,
+        orientation: orientationProp,
+        model: {
+          uri: '/models/fly.glb',
+          minimumPixelSize: 128,
+          maximumScale: 2000,
+          scale: 1.0,
+          runAnimations: true
+        },
+        path: {
+          resolution: 1,
+          material: new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.1, color: Cesium.Color.CYAN }),
+          width: 5,
+          leadTime: 0,
+          trailTime: 9999
+        }
+      });
+
+      this.viewer.clock.startTime = startJulian.clone();
+      this.viewer.clock.stopTime = stopJulian.clone();
+      this.viewer.clock.currentTime = startJulian.clone();
+      this.viewer.clock.clockRange = Cesium.ClockRange.LOOP_STOP;
+      this.viewer.clock.shouldAnimate = true;
+
+      this.enableDynamicChaseCamera(this.droneEntity, cameraOffsetProp);
+    },
+    enableChaseCamera(entity, distance = 80, height = 30) {
+      const Cesium = this.cesiumLib || window.Cesium;
+
+      // 1. 清理旧的监听器，防止重复绑定导致相机乱晃
+      if (this.chaseCameraListener) {
+        this.viewer.scene.postUpdate.removeEventListener(this.chaseCameraListener);
+        this.chaseCameraListener = null;
+      }
+
+      // 2. 定义每帧刷新逻辑
+      this.chaseCameraListener = () => {
+        // 只有无人机存在且在显示时才跟随
+        if (!entity || !entity.show) return;
+
+        const time = this.viewer.clock.currentTime;
+
+        // 获取当前时刻的位置和朝向
+        const position = entity.position.getValue(time);
+        const orientation = entity.orientation.getValue(time);
+
+        if (position && orientation) {
+          // A. 计算模型变换矩阵 (Model Matrix)
+          // 这个矩阵代表了无人机当前的坐标系：原点在无人机中心，轴向跟随无人机旋转
+          const transform = Cesium.Matrix4.fromRotationTranslation(
+              Cesium.Matrix3.fromQuaternion(orientation),
+              position
+          );
+
+          // B. 定义相机在【局部坐标系】中的位置
+          // 假设：X轴是正前方，Y轴是右侧，Z轴是上方
+          // 我们要放在：后方 (-X) 且 上方 (+Z)
+          // 注意：不同模型的坐标系可能不同。如果发现相机在侧面，请调整这里的 x/y 值
+          const offset = new Cesium.Cartesian3(-distance, 0, height);
+
+          // C. 将局部偏移量转换为世界坐标
+          const cameraPosition = Cesium.Matrix4.multiplyByPoint(
+              transform,
+              offset,
+              new Cesium.Cartesian3()
+          );
+
+          // D. 设置相机
+          // destination: 相机位置 (世界坐标)
+          // orientation: 让相机看向无人机中心 (direction)
+
+          // 计算相机看向目标的方向向量
+          const direction = Cesium.Cartesian3.subtract(
+              position,
+              cameraPosition,
+              new Cesium.Cartesian3()
+          );
+          Cesium.Cartesian3.normalize(direction, direction);
+
+          // 设置相机，保持 Up 轴大致向上 (避免翻滚)
+          this.viewer.camera.setView({
+            destination: cameraPosition,
+            orientation: {
+              direction: direction,
+              up: Cesium.Cartesian3.normalize(position, new Cesium.Cartesian3()) // 使用地心向量作为Up，保持地球水平
+            }
+          });
+        }
+      };
+
+      // 3. 绑定到场景更新事件 (每一帧渲染前执行)
+      this.viewer.scene.postUpdate.addEventListener(this.chaseCameraListener);
+    },
+    // --- 辅助方法 ---
+    enableDynamicChaseCamera(entity, offsetProperty) {
+      const Cesium = this.cesiumLib || window.Cesium;
+
+      if (this.chaseCameraListener) {
+        this.viewer.scene.postUpdate.removeEventListener(this.chaseCameraListener);
+      }
+
+      this.chaseCameraListener = () => {
+        if (!entity || !entity.show) return;
+
+        const time = this.viewer.clock.currentTime;
+
+        // 1. 获取当前时刻的各项属性
+        const position = entity.position.getValue(time);
+        const orientation = entity.orientation.getValue(time);
+        // 【关键】获取当前时刻应该有的相机偏移量 (是远是近，由时间轴决定)
+        const currentOffset = offsetProperty.getValue(time);
+
+        if (position && orientation && currentOffset) {
+          const transform = Cesium.Matrix4.fromRotationTranslation(
+              Cesium.Matrix3.fromQuaternion(orientation),
+              position
+          );
+
+          // 2. 应用动态偏移量
+          const cameraPosition = Cesium.Matrix4.multiplyByPoint(
+              transform,
+              currentOffset,
+              new Cesium.Cartesian3()
+          );
+
+          // 3. 计算朝向 (相机始终盯着无人机中心)
+          // 如果是特写模式(Zoomed)，相机其实是在无人机前方，回头看无人机可能会穿模
+          // 所以这里做一个微调：
+          // 如果 currentOffset.x > 0 (在机头前方)，我们就让相机看向前方无限远，模拟第一人称
+          // 如果 currentOffset.x < 0 (在机尾后方)，我们就看向无人机
+
+          let direction;
+
+          if (currentOffset.x > 0) {
+            // 模拟第一人称：方向就是无人机的正前方
+            // 简单做法：取 transform 的 X 轴方向
+            const forwardTarget = Cesium.Matrix4.multiplyByPoint(transform, new Cesium.Cartesian3(100, 0, 0), new Cesium.Cartesian3());
+            direction = Cesium.Cartesian3.subtract(forwardTarget, cameraPosition, new Cesium.Cartesian3());
+          } else {
+            // 模拟第三人称：看向无人机
+            direction = Cesium.Cartesian3.subtract(position, cameraPosition, new Cesium.Cartesian3());
+          }
+
+          Cesium.Cartesian3.normalize(direction, direction);
+
+          this.viewer.camera.setView({
+            destination: cameraPosition,
+            orientation: {
+              direction: direction,
+              up: Cesium.Cartesian3.normalize(position, new Cesium.Cartesian3())
+            }
+          });
+        }
+      };
+
+      this.viewer.scene.postUpdate.addEventListener(this.chaseCameraListener);
+    },
+    focusOnModel() {
+      if (this.viewer && this.tileset) {
+        const Cesium = this.cesiumLib || window.Cesium;
+        if (!Cesium) return;
+        const range = (this.tileset.boundingSphere?.radius || 1000) * 2.5;
+        this.viewer.flyTo(this.tileset, {
+          offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-30), range)
+        }).catch(err => console.warn('飞到模型失败', err));
+      }
+    },
+
+    resetCameraView() {
+      if (this.viewer) {
+        const Cesium = this.cesiumLib || window.Cesium;
+        if (!Cesium) return;
+
+        if (this.chaseCameraListener) {
+          this.viewer.scene.postUpdate.removeEventListener(this.chaseCameraListener);
+          this.chaseCameraListener = null;
+        }
+        this.viewer.trackedEntity = undefined;
+
+        if (this.waylineEntity?.polyline?.positions) {
+          const positions = this.waylineEntity.polyline.positions.getValue(new Cesium.JulianDate());
+          if (positions?.[0]) {
+            this.viewer.camera.flyTo({
+              destination: positions[0],
+              orientation: {
+                heading: Cesium.Math.toRadians(0),
+                pitch: Cesium.Math.toRadians(-45),
+                roll: 0.0
+              },
+              duration: 1.2
+            });
+            return;
+          }
+        }
+      }
+    },
+
+    toggleGlobe() {
+      this.globeVisible = !this.globeVisible;
+      if (this.viewer) {
+        this.viewer.scene.globe.show = this.globeVisible;
+      }
+    },
+
+    handleViewAlarmDetail(alarm) {
+      this.currentAlarm = alarm;
+      this.showAlarmDetail = true;
+    },
+
+    async handleProcessAlarm(alarmId) {
+      try {
+        await alarmApi.patchAlarm(alarmId, { status: 'COMPLETED' });
+        this.alarms = this.alarms.filter(alarm => alarm.id !== alarmId);
+      } catch (error) {
+        console.error('更新告警状态失败:', error);
+      }
+    },
+
+    formatAlarmTime(timestamp) {
+      if (!timestamp) return '--';
+      const date = new Date(timestamp);
+      return date.toLocaleString('zh-CN');
     },
 
     async loadComponentConfig() {
       try {
-        this.componentConfig = await componentConfigApi.getConfig()
+        this.componentConfig = await componentConfigApi.getConfig();
       } catch (err) {
-        console.warn('获取组件配置失败，将使用默认配置', err)
+        console.warn('获取组件配置失败，将使用默认配置', err);
       }
     },
+    // async setupImageryLayers(Cesium) {
+    //   if (!this.viewer) return;
+    //   const layers = this.viewer.imageryLayers;
+    //   layers.removeAll();
+    //   const localTilesUrl = 'http://192.168.10.10:5000/tiles/{z}/{x}/{y}';
+    //   const extent = Cesium.Rectangle.fromDegrees(122.0, 41.0, 124.0, 43.0);
+    //
+    //   try {
+    //     const layer = new Cesium.UrlTemplateImageryProvider({
+    //       url: localTilesUrl,
+    //       tilingScheme: new Cesium.WebMercatorTilingScheme(),
+    //       rectangle: extent,
+    //       minimumLevel: 0,
+    //       maximumLevel: 19
+    //     });
+    //     layers.addImageryProvider(layer);
+    //     setTimeout(() => {
+    //       this.viewer.camera.flyTo({ destination: extent });
+    //     }, 1000);
+    //   } catch (e) {
+    //     console.warn('地图加载失败', e);
+    //   }
+    // },
     async setupImageryLayers(Cesium) {
-      if (!this.viewer) return
-      const layers = this.viewer.imageryLayers
-      layers.removeAll()
-
-      // 【修改这里】
-      // 1. 端口改成 Django 的默认端口 8000
-      // 2. 注意 Django 的 URL 结尾通常习惯带斜杠 /，要和 urls.py 里保持一致
-      // 3. 如果你的 urls.py 有前缀（比如 api/），记得加上，例如 'http://127.0.0.1:8000/api/tiles/{z}/{x}/{y}/'
-      const localTilesUrl = 'http://192.168.10.10:5000/tiles/{z}/{x}/{y}'
-      // const localTilesUrl = 'http://127.0.0.1:5000/tiles/{z}/{x}/{y}'
-
-
-      // 沈阳范围 (西, 南, 东, 北)
-      const extent = Cesium.Rectangle.fromDegrees(122.0, 41.0, 124.0, 43.0)
+      if (!this.viewer) return;
+      const layers = this.viewer.imageryLayers;
+      layers.removeAll();
 
       try {
-        const layer = new Cesium.UrlTemplateImageryProvider({
-          url: localTilesUrl,
-          tilingScheme: new Cesium.WebMercatorTilingScheme(),
-          rectangle: extent,
-          minimumLevel: 0,
-          maximumLevel: 19
-          // 不需要 customTags，因为 Django 后端已经做了翻转处理
-        })
+        // 方案 B：使用 ArcGIS 全球卫星底图 (无需申请 Key，稳定且快)
+        const arcgisProvider = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
+            'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'
+        );
+        layers.addImageryProvider(arcgisProvider);
 
-        layers.addImageryProvider(layer)
-
-        setTimeout(() => {
-          this.viewer.camera.flyTo({
-            destination: extent
-          })
-        }, 1000)
+        // 叠加一层透明的混合路网（可选，为了看地名）
+        // const roads = await Cesium.ArcGisMapServerImageryProvider.fromUrl(
+        //   'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Hybrid_Reference/MapServer'
+        // );
+        // layers.addImageryProvider(roads);
 
       } catch (e) {
-        console.warn('地图加载失败', e)
+        console.warn('地图加载失败', e);
+      }
+    },
+    tuneCameraControls(controller) {
+      if (!controller) return;
+      controller.inertiaSpin = 0.4;
+      controller.inertiaTranslate = 0.4;
+      controller.inertiaZoom = 0.4;
+      controller.minimumZoomRate = 0.2;
+      controller.maximumZoomRate = 500000;
+      controller._zoomFactor = 1.5;
+    },
+
+    async fetchAlarmsByWayline(waylineId) {
+      if (!waylineId) {
+        this.alarms = [];
+        this.clearAlarmMarkers();
+        return;
+      }
+      this.loadingAlarms = true;
+      try {
+        const response = await alarmApi.getAlarms({ wayline: waylineId });
+        this.alarms = Array.isArray(response) ? response : (response.results || []);
+        this.plotAlarmMarkers(this.alarms);
+      } catch (error) {
+        console.error('获取告警信息失败:', error);
+        this.alarms = [];
+        this.clearAlarmMarkers();
+      } finally {
+        this.loadingAlarms = false;
       }
     },
 
-    tuneCameraControls(controller) {
-      if (!controller) return
-      controller.inertiaSpin = 0.4
-      controller.inertiaTranslate = 0.4
-      controller.inertiaZoom = 0.4
-      controller.minimumZoomRate = 0.2
-      controller.maximumZoomRate = 500000
-      controller._zoomFactor = 1.5
-    },
-    
-    async fetchAlarmsByWayline(waylineId) {
-      if (!waylineId) {
-        this.alarms = []
-        this.clearAlarmMarkers()
-        return
-      }
-      
-      this.loadingAlarms = true
-      try {
-        const response = await alarmApi.getAlarms({ wayline: waylineId })
-        this.alarms = Array.isArray(response) ? response : (response.results || [])
-        this.plotAlarmMarkers(this.alarms)
-      } catch (error) {
-        console.error('获取告警信息失败:', error)
-        this.alarms = []
-        this.clearAlarmMarkers()
-      } finally {
-        this.loadingAlarms = false
-      }
-    },
-    
     getFilteredAlarms() {
-      return this.alarms
+      return this.alarms;
     },
-    
+
     handleAlarmRefresh() {
       if (this.selectedWayline) {
-        this.fetchAlarmsByWayline(this.selectedWayline.id)
+        this.fetchAlarmsByWayline(this.selectedWayline.id);
       }
-      // 保持标记与最新数据同步
       if (this.alarms.length) {
-        this.plotAlarmMarkers(this.alarms)
+        this.plotAlarmMarkers(this.alarms);
       }
     },
-    
+
     startTaskPolling() {
-      this.fetchCurrentTask()
+      this.fetchCurrentTask();
       this.taskPollTimer = setInterval(() => {
-        this.fetchCurrentTask()
-      }, 3000)
+        this.fetchCurrentTask();
+      }, 3000);
     },
 
     async fetchCurrentTask() {
       try {
-        // 1. 优先获取正在进行的任务
         let response = await inspectTaskApi.getInspectTasks({
           detect_status__in: 'scanning,processing',
           ordering: '-updated_at',
           limit: 1
-        })
-        
-        let tasks = response.results || response.data || []
-        
-        // 2. 如果没有正在进行的任务，获取最近的一个任务
+        });
+        let tasks = response.results || response.data || [];
         if (tasks.length === 0) {
           response = await inspectTaskApi.getInspectTasks({
             ordering: '-created_at',
             limit: 1
-          })
-          tasks = response.results || response.data || []
+          });
+          tasks = response.results || response.data || [];
         }
 
         if (tasks.length > 0) {
-          const task = tasks[0]
-          this.currentTask = task.external_task_id || task.dji_task_name || '未命名任务'
-          this.totalTasks = task.total_images || 0
-          this.completedTasks = task.completed_images || 0
-          
+          const task = tasks[0];
+          this.currentTask = task.external_task_id || task.dji_task_name || '未命名任务';
+          this.totalTasks = task.total_images || 0;
+          this.completedTasks = task.completed_images || 0;
           if (this.totalTasks > 0) {
-            this.taskProgress = Math.round((this.completedTasks / this.totalTasks) * 100)
+            this.taskProgress = Math.round((this.completedTasks / this.totalTasks) * 100);
           } else {
-            this.taskProgress = 0
+            this.taskProgress = 0;
           }
         }
       } catch (error) {
-        console.error('获取当前任务失败:', error)
+        console.error('获取当前任务失败:', error);
       }
     },
-    
+
     async initSelectedWaylineFromRoute() {
       try {
-        const id = this.$route?.query?.wayline_id
-        if (!id) return
-        const detail = await alarmApi.getWaylineDetail(id)
+        const id = this.$route?.query?.wayline_id;
+        if (!id) return;
+        const detail = await alarmApi.getWaylineDetail(id);
         if (detail && detail.id) {
-          this.selectedWayline = detail
-          this.fetchAlarmsByWayline(detail.id)
-          this.ensureWaylineWithPoints(detail)
-          this.fetchActionDetails(detail.id)
+          this.selectedWayline = detail;
+          this.fetchAlarmsByWayline(detail.id);
+          this.ensureWaylineWithPoints(detail);
+          this.fetchActionDetails(detail.id);
         }
       } catch (e) {
-        console.warn('根据路由初始化航线失败', e)
+        console.warn('根据路由初始化航线失败', e);
       }
     },
     async fetchActionDetails(waylineId) {
       try {
-        const res = await waylineApi.getWaylineActionDetails(waylineId)
-        this.actionDetails = Array.isArray(res?.action_details) ? res.action_details : []
-        this.plotActionDetailMarkers(this.actionDetails)
+        const res = await waylineApi.getWaylineActionDetails(waylineId);
+        this.actionDetails = Array.isArray(res?.action_details) ? res.action_details : [];
+        this.plotActionDetailMarkers(this.actionDetails);
       } catch (e) {
-        console.warn('获取航线动作详情失败', e)
-        this.actionDetails = []
-        this.clearActionDetailMarkers()
+        console.warn('获取航线动作详情失败', e);
+        this.actionDetails = [];
+        this.clearActionDetailMarkers();
       }
     },
     plotActionDetailMarkers(details) {
-      if (!this.viewer) return
-      const Cesium = this.cesiumLib || window.Cesium
-      if (!Cesium) return
-      this.clearActionDetailMarkers()
-      const entities = []
+      if (!this.viewer) return;
+      const Cesium = this.cesiumLib || window.Cesium;
+      if (!Cesium) return;
+      this.clearActionDetailMarkers();
+      const entities = [];
       details.forEach(d => {
-        const lat = Number(d.lat)
-        const lon = Number(d.lon)
-        const h = Number(d.height || 0)
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return
-        const position = Cesium.Cartesian3.fromDegrees(lon, lat, h)
+        const lat = Number(d.lat);
+        const lon = Number(d.lon);
+        const h = Number(d.height || 0);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+        const position = Cesium.Cartesian3.fromDegrees(lon, lat, h);
         const entity = this.viewer.entities.add({
           position,
           point: {
@@ -597,27 +1152,27 @@ export default {
             pixelOffset: new Cesium.Cartesian2(0, -20),
             disableDepthTestDistance: Number.POSITIVE_INFINITY
           }
-        })
-        entities.push(entity)
-      })
-      this.actionDetailEntities = entities
+        });
+        entities.push(entity);
+      });
+      this.actionDetailEntities = entities;
     },
     clearActionDetailMarkers() {
       if (this.viewer && this.actionDetailEntities.length) {
-        this.actionDetailEntities.forEach(e => this.viewer.entities.remove(e))
+        this.actionDetailEntities.forEach(e => this.viewer.entities.remove(e));
       }
-      this.actionDetailEntities = []
+      this.actionDetailEntities = [];
     },
 
     handleLocateAlarm(alarm) {
-      const lat = this.toNumber(alarm?.latitude)
-      const lon = this.toNumber(alarm?.longitude)
-      if (!Number.isFinite(lat) || !Number.isFinite(lon) || !this.viewer) return
-      const Cesium = this.cesiumLib || window.Cesium
-      if (!Cesium) return
-      const height = this.toNumber(alarm?.altitude) || 200
-      const destination = Cesium.Cartesian3.fromDegrees(lon, lat, height)
-      const flyPromise = this.viewer.camera.flyTo({
+      const lat = this.toNumber(alarm?.latitude);
+      const lon = this.toNumber(alarm?.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || !this.viewer) return;
+      const Cesium = this.cesiumLib || window.Cesium;
+      if (!Cesium) return;
+      const height = this.toNumber(alarm?.altitude) || 200;
+      const destination = Cesium.Cartesian3.fromDegrees(lon, lat, height);
+      this.viewer.camera.flyTo({
         destination,
         orientation: {
           heading: Cesium.Math.toRadians(0),
@@ -625,24 +1180,21 @@ export default {
           roll: 0.0
         },
         duration: 1.2
-      })
-      if (flyPromise && typeof flyPromise.catch === 'function') {
-        flyPromise.catch(() => {})
-      }
+      });
     },
     plotAlarmMarkers(alarms) {
-      if (!this.viewer) return
-      const Cesium = this.cesiumLib || window.Cesium
-      if (!Cesium) return
-      this.clearAlarmMarkers()
-      const entities = []
-      const pinBuilder = (Cesium.PinBuilder) ? new Cesium.PinBuilder() : null
-      const pinCanvas = pinBuilder ? pinBuilder.fromColor(Cesium.Color.ORANGE, 32) : null
+      if (!this.viewer) return;
+      const Cesium = this.cesiumLib || window.Cesium;
+      if (!Cesium) return;
+      this.clearAlarmMarkers();
+      const entities = [];
+      const pinBuilder = (Cesium.PinBuilder) ? new Cesium.PinBuilder() : null;
+      const pinCanvas = pinBuilder ? pinBuilder.fromColor(Cesium.Color.ORANGE, 32) : null;
       alarms.forEach(alarm => {
-        const lat = this.toNumber(alarm.latitude)
-        const lon = this.toNumber(alarm.longitude)
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return
-        const position = Cesium.Cartesian3.fromDegrees(lon, lat, this.toNumber(alarm.altitude) || 0)
+        const lat = this.toNumber(alarm.latitude);
+        const lon = this.toNumber(alarm.longitude);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+        const position = Cesium.Cartesian3.fromDegrees(lon, lat, this.toNumber(alarm.altitude) || 0);
         const entity = this.viewer.entities.add({
           position,
           alarmData: alarm,
@@ -670,174 +1222,34 @@ export default {
             pixelOffset: new Cesium.Cartesian2(0, -28),
             disableDepthTestDistance: Number.POSITIVE_INFINITY
           }
-        })
-        entities.push(entity)
-      })
-      this.alarmEntities = entities
+        });
+        entities.push(entity);
+      });
+      this.alarmEntities = entities;
     },
 
     clearAlarmMarkers() {
       if (this.viewer && this.alarmEntities.length) {
-        this.alarmEntities.forEach(e => this.viewer.entities.remove(e))
+        this.alarmEntities.forEach(e => this.viewer.entities.remove(e));
       }
-      this.alarmEntities = []
+      this.alarmEntities = [];
     },
 
     setupPickHandler(Cesium) {
-      if (!this.viewer || this.pickHandler) return
-      this.pickHandler = new Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas)
+      if (!this.viewer || this.pickHandler) return;
+      this.pickHandler = new Cesium.ScreenSpaceEventHandler(this.viewer.scene.canvas);
       this.pickHandler.setInputAction(click => {
-        const picked = this.viewer.scene.pick(click.position)
+        const picked = this.viewer.scene.pick(click.position);
         if (Cesium.defined(picked) && picked.id && picked.id.alarmData) {
-          this.currentAlarm = picked.id.alarmData
-          this.showAlarmDetail = true
+          this.currentAlarm = picked.id.alarmData;
+          this.showAlarmDetail = true;
         }
-      }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
+      }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
     },
 
     toNumber(val) {
-      const num = Number(val)
-      return Number.isFinite(num) ? num : NaN
-    },
-
-    async ensureWaylineWithPoints(wayline) {
-      const hasPoints = Array.isArray(wayline?.waypoints) && wayline.waypoints.length > 0
-      let finalWayline = wayline
-      if (!hasPoints && wayline?.id) {
-        try {
-          const detail = await alarmApi.getWaylineDetail(wayline.id)
-          finalWayline = (detail && detail.id) ? detail : wayline
-        } catch (err) {
-          console.warn('获取航线详情失败，使用已选航线基本信息', err)
-        }
-      }
-      this.drawWaylineOnMap(finalWayline)
-    },
-
-    drawWaylineOnMap(wayline) {
-      if (!this.viewer || !wayline?.waypoints?.length) {
-        return
-      }
-      const Cesium = this.cesiumLib || window.Cesium
-      if (!Cesium) return
-
-      // 清理旧的路径
-      if (this.waylineEntity) {
-        this.viewer.entities.remove(this.waylineEntity)
-        this.waylineEntity = null
-      }
-
-      const positions = wayline.waypoints
-        .filter(p => p.longitude !== undefined && p.latitude !== undefined)
-        .map(p => Cesium.Cartesian3.fromDegrees(p.longitude, p.latitude, p.height || 0))
-
-      if (!positions.length) return
-
-      this.waylineEntity = this.viewer.entities.add({
-        name: wayline.name || '航线',
-        polyline: {
-          positions,
-          width: 6,
-          material: Cesium.Color.YELLOW.withAlpha(0.9),
-          clampToGround: false
-        }
-      })
-
-      // 定位到路径
-      const sphere = Cesium.BoundingSphere.fromPoints(positions)
-      this.viewer.camera.flyToBoundingSphere(sphere, {
-        duration: 1.2,
-        offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-20), sphere.radius * 3)
-      })
-    },
-
-    focusOnModel() {
-      if (this.viewer && this.tileset) {
-        const Cesium = this.cesiumLib || window.Cesium
-        if (!Cesium) return
-        const range = (this.tileset.boundingSphere?.radius || 1000) * 2.5
-        this.viewer.flyTo(this.tileset, {
-          offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-30), range)
-        }).catch(err => {
-          console.warn('飞到模型失败', err)
-        })
-      } else if (this.viewer && this.waylineEntity) {
-        const Cesium = this.cesiumLib || window.Cesium
-        if (!Cesium) return
-        const positions = this.waylineEntity.polyline.positions.getValue(new Cesium.JulianDate())
-        const sphere = Cesium.BoundingSphere.fromPoints(positions)
-        this.viewer.camera.flyToBoundingSphere(sphere, {
-          duration: 1.2,
-          offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-20), sphere.radius * 3)
-        })
-      }
-    },
-
-    resetCameraView() {
-      if (this.viewer) {
-        const Cesium = this.cesiumLib || window.Cesium
-        if (!Cesium) return
-
-        // 优先定位到当前航线起点
-        if (this.waylineEntity?.polyline?.positions) {
-          const positions = this.waylineEntity.polyline.positions.getValue(new Cesium.JulianDate())
-          const first = Array.isArray(positions) && positions.length ? positions[0] : null
-          if (first) {
-            this.viewer.camera.flyTo({
-              destination: first,
-              orientation: {
-                heading: Cesium.Math.toRadians(0),
-                pitch: Cesium.Math.toRadians(-45),
-                roll: 0.0
-              },
-              duration: 1.2
-            })
-            return
-          }
-        }
-
-        // 退回模型中心
-        if (this.tileset?.boundingSphere) {
-          const range = (this.tileset.boundingSphere.radius || 1000) * 3
-          this.viewer.camera.flyTo({
-            destination: this.tileset.boundingSphere.center,
-            orientation: {
-              heading: Cesium.Math.toRadians(0),
-              pitch: Cesium.Math.toRadians(-20),
-              roll: 0.0
-            },
-            duration: 1.5,
-            maximumHeight: range
-          })
-        }
-      }
-    },
-
-    toggleGlobe() {
-      this.globeVisible = !this.globeVisible
-      if (this.viewer) {
-        this.viewer.scene.globe.show = this.globeVisible
-      }
-    },
-    
-    handleViewAlarmDetail(alarm) {
-      this.currentAlarm = alarm
-      this.showAlarmDetail = true
-    },
-    
-    async handleProcessAlarm(alarmId) {
-      try {
-        await alarmApi.patchAlarm(alarmId, { status: 'COMPLETED' })
-        this.alarms = this.alarms.filter(alarm => alarm.id !== alarmId)
-      } catch (error) {
-        console.error('更新告警状态失败:', error)
-      }
-    },
-    
-    formatAlarmTime(timestamp) {
-      if (!timestamp) return '--'
-      const date = new Date(timestamp)
-      return date.toLocaleString('zh-CN')
+      const num = Number(val);
+      return Number.isFinite(num) ? num : NaN;
     }
   }
 }
@@ -852,8 +1264,8 @@ export default {
   padding: 24px;
   box-sizing: border-box;
   background: radial-gradient(circle at 20% 20%, rgba(0, 212, 255, 0.08), transparent 25%),
-              radial-gradient(circle at 80% 0, rgba(0, 153, 255, 0.06), transparent 30%),
-              #0b1024;
+  radial-gradient(circle at 80% 0, rgba(0, 153, 255, 0.06), transparent 30%),
+  #0b1024;
   color: #e2e8f0;
   overflow: hidden;
 }
