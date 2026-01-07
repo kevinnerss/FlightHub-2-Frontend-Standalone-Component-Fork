@@ -11,6 +11,7 @@ const ComponentConfig = () => import('../views/ComponentConfig.vue')
 const CarouselDetection = () => import('../views/CarouselDetection.vue')
 const CreateFlightTask = () => import('../views/CreateFlightTask.vue')
 const InspectTaskManagement = () => import('../views/InspectTaskManagement.vue')
+const MainView = () => import("../views/MainView.vue");
 //const MediaLibrary = () => import('../views/ceshi.vue')
 
 const routes = [
@@ -54,6 +55,16 @@ const routes = [
       title: '\u4e3b\u63a7\u53f0',
       requiresAuth: true
     }
+  },
+
+  {
+    path: "/main-view",
+    name: "MainView",
+    component: MainView,
+    meta: {
+      title: "首页",
+      requiresAuth: true,
+    },
   },
 
   {
