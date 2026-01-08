@@ -34,7 +34,7 @@ export default {
     InspectTaskList
   },
   metaInfo: {
-    title: '巡检任务管理 - FlightHub'
+    title: '巡检任务管理 - 沈阳地铁低空智能巡检平台'
   }
 }
 </script>

@@ -125,34 +125,36 @@
             </div>
           </div>
         </div>
-      </div>
 
-      <div class="panel-card">
-        <div class="card-header">
-          <div class="header-icon">🌲</div>
-          <div class="header-title">航线树</div>
-        </div>
-        <div class="card-body">
-          <div v-if="treeLoading" class="empty-placeholder">加载中...</div>
-          <div v-else-if="treeError" class="empty-placeholder">{{ treeError }}</div>
-          <div v-else class="tree-container">
-            <div class="tree-group" v-for="group in waylineTree" :key="group.type">
-              <div class="tree-group-header" @click="toggleGroup(group.type)">
-                <span class="group-name">{{ group.label }}</span>
-                <span class="group-count">（{{ group.count }} 条航线）</span>
-                <span class="toggle-icon">{{ expandedMap[group.type] ? '▼' : '▶' }}</span>
-              </div>
-              <div class="tree-items" v-show="expandedMap[group.type]">
-                <div class="tree-item" v-for="item in group.items" :key="item.id" @click="selectWayline(item)">
-                  <span class="item-name">{{ item.name }}</span>
-                  <span class="item-meta" v-if="item.recent_task_time">最近任务：{{ formatTime(item.recent_task_time) }}</span>
+        <!-- 航线树 -->
+        <div class="panel-card">
+          <div class="card-header">
+            <div class="header-icon">🌲</div>
+            <div class="header-title">航线树</div>
+          </div>
+          <div class="card-body">
+            <div v-if="treeLoading" class="empty-placeholder">加载中...</div>
+            <div v-else-if="treeError" class="empty-placeholder">{{ treeError }}</div>
+            <div v-else class="tree-container">
+              <div class="tree-group" v-for="group in waylineTree" :key="group.type">
+                <div class="tree-group-header" @click="toggleGroup(group.type)">
+                  <span class="group-name">{{ group.label }}</span>
+                  <span class="group-count">（{{ group.count }} 条航线）</span>
+                  <span class="toggle-icon">{{ expandedMap[group.type] ? '▼' : '▶' }}</span>
                 </div>
-                <div v-if="!group.items.length" class="empty-placeholder">暂无航线</div>
+                <div class="tree-items" v-show="expandedMap[group.type]">
+                  <div class="tree-item" v-for="item in group.items" :key="item.id" @click="selectWayline(item)">
+                    <span class="item-name">{{ item.name }}</span>
+                    <span class="item-meta" v-if="item.recent_task_time">最近任务：{{ formatTime(item.recent_task_time) }}</span>
+                  </div>
+                  <div v-if="!group.items.length" class="empty-placeholder">暂无航线</div>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
+
       <!-- 中间3D模型展示区 -->
       <div class="center-panel">
         <div class="model-display-area">
@@ -199,32 +201,6 @@
                   <div class="bar-label">{{ item.type }}</div>
                 </div>
               </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 检测类型分布 -->
-        <div class="panel-card">
-          <div class="card-header">
-            <div class="header-icon">🎯</div>
-            <div class="header-title">检测类型</div>
-          </div>
-          <div class="card-body">
-            <div v-if="detectionTypes.length > 0" class="detection-grid">
-              <div 
-                class="detection-item" 
-                v-for="item in detectionTypes" 
-                :key="item.type"
-              >
-                <div class="detection-icon" :style="{ borderColor: item.color }">
-                  {{ item.icon }}
-                </div>
-                <div class="detection-name">{{ item.type }}</div>
-                <div class="detection-count">{{ item.count }}</div>
-              </div>
-            </div>
-            <div v-else class="empty-placeholder">
-              <p>暂无检测类型数据</p>
             </div>
           </div>
         </div>
@@ -293,8 +269,6 @@ export default {
       },
       // 告警分类统计（按AlarmCategory分组）
       alarmStats: [],
-      // 检测类型统计（按detect_category分组的任务数）
-      detectionTypes: [],
       // 最近事件（最新的InspectTask）
       recentEvents: [],
       // 定时器

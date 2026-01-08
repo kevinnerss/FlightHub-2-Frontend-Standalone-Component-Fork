@@ -101,9 +101,9 @@
             <td>
               <div class="action-buttons">
                 <!-- 🔥 如果是子任务，显示回放按钮 -->
-                <button 
+                <button
                   v-if="categoryFilter && task.detect_status === 'done'"
-                  @click="playbackSubTask(task)" 
+                  @click="playbackSubTask(task)"
                   class="action-btn playback-btn"
                 >
                   回放
@@ -114,6 +114,15 @@
                 <!-- 父任务才显示查看子任务按钮 -->
                 <button v-if="!categoryFilter" @click="viewSubTasks(task)" class="action-btn subtask-btn">
                   查看子任务
+                </button>
+                <!-- 🔥 新增：强制删除按钮（只对进行中的任务显示） -->
+                <button
+                  v-if="task.detect_status === 'scanning' || task.detect_status === 'processing'"
+                  @click="forceDeleteTask(task)"
+                  class="action-btn force-delete-btn"
+                  title="强制结束并删除任务及其所有相关数据"
+                >
+                  强制删除
                 </button>
                 <button @click="deleteTask(task.id)" class="action-btn delete-btn">
                   删除
@@ -404,7 +413,7 @@ export default {
       if (!confirm('确定要删除这个巡检任务吗？')) {
         return
       }
-      
+
       try {
         await inspectTaskApi.deleteInspectTask(taskId)
         ElMessage.success('删除成功')
@@ -412,6 +421,50 @@ export default {
       } catch (error) {
         console.error('删除任务失败:', error)
         ElMessage.error('删除任务失败')
+      }
+    },
+
+    async forceDeleteTask(task) {
+      const taskInfo = task.external_task_id || task.id
+      const confirmMsg = `⚠️ 警告：强制删除将彻底删除任务及其所有相关数据！\n\n` +
+        `任务: ${taskInfo}\n` +
+        `包括:\n` +
+        `- 所有图片记录 (InspectImage)\n` +
+        `- 所有告警记录 (Alarm)\n` +
+        `- 任务本身 (InspectTask)\n\n` +
+        `此操作不可恢复！确定要继续吗？`
+
+      if (!confirm(confirmMsg)) {
+        return
+      }
+
+      // 二次确认
+      if (!confirm('最后确认：真的要强制删除这个任务吗？所有相关数据将被永久删除！')) {
+        return
+      }
+
+      try {
+        ElMessage.info({
+          message: '正在强制删除任务...',
+          duration: 2000
+        })
+
+        const response = await inspectTaskApi.forceDeleteTask(task.id)
+
+        ElMessage.success({
+          message: `强制删除成功！已删除 ${response.deleted_images || 0} 张图片和相关告警`,
+          duration: 3000
+        })
+
+        // 重新加载任务列表
+        await this.loadTasks()
+      } catch (error) {
+        console.error('强制删除任务失败:', error)
+        const errorMsg = error.response?.data?.detail || error.message || '强制删除任务失败'
+        ElMessage.error({
+          message: errorMsg,
+          duration: 5000
+        })
       }
     },
     
@@ -802,6 +855,27 @@ export default {
 .delete-btn:hover:not(:disabled) {
   box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
   transform: translateY(-1px);
+}
+
+.force-delete-btn {
+  background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+  color: #fff;
+  font-weight: 600;
+  animation: pulse-orange 2s ease-in-out infinite;
+}
+
+.force-delete-btn:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.5);
+  transform: translateY(-1px);
+}
+
+@keyframes pulse-orange {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(249, 115, 22, 0);
+  }
 }
 
 .playback-btn {

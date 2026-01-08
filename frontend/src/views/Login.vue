@@ -18,7 +18,7 @@
             <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </div>
-        <h1 class="title">FlightHub</h1>
+        <h1 class="title">沈阳地铁低空智能巡检平台</h1>
         <p class="subtitle">无人机巡检数字孪生系统</p>
       </div>
 

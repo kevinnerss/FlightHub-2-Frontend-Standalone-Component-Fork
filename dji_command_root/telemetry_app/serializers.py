@@ -286,14 +286,24 @@ class InspectTaskSerializer(serializers.ModelSerializer):
         return None
 
     def get_alarm_count(self, obj):
+        """
+        统计任务的告警数量
+
+        逻辑：
+        1. 统计当前任务及其所有子任务的告警
+        2. 只统计精确匹配的告警（通过 source_image__inspect_task_id）
+        3. 不使用备用统计（避免重复计数）
+
+        注意：
+        - 一张图片可能产生多个告警（多种异常类型）
+        - 所以 alarm_count 可能大于 total_images，这是正常的
+        """
+        # 获取任务ID列表（当前任务 + 所有子任务）
         ids = [obj.id] + list(obj.sub_tasks.values_list('id', flat=True))
+
+        # 精确统计：只统计这些任务的告警
         cnt = Alarm.objects.filter(source_image__inspect_task_id__in=ids).count()
-        if cnt == 0 and obj.wayline_id:
-            t0 = obj.started_at or obj.created_at
-            q = Alarm.objects.filter(wayline=obj.wayline)
-            if t0:
-                q = q.filter(created_at__gte=t0)
-            cnt = q.count()
+
         return cnt
 
     def get_total_images(self, obj):

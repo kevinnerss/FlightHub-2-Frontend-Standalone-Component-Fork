@@ -11,7 +11,7 @@
         </div>
         <div class="header-text">
           <p class="eyebrow">推线检测流程展示</p>
-          <h1 class="page-title">轮播检测</h1>
+          <h1 class="page-title">AI检测</h1>
           <p class="page-subtitle">使用告警图片还原推线检测的处理状态，前两张保持“检测中”提示，自动轮播播放</p>
         </div>
       </div>
@@ -291,6 +291,13 @@
               </div>
               <button
                 class="control-btn ghost"
+                @click="toggleInspectPlaybackPause"
+                :disabled="!inspectImages.length"
+              >
+                {{ inspectPlaybackPaused ? '继续' : '暂停' }}
+              </button>
+              <button
+                class="control-btn ghost"
                 @click="jumpToLatestInspectImage"
                 :disabled="!inspectImages.length || inspectIndex >= inspectImages.length - 1"
               >
@@ -395,6 +402,7 @@ export default {
       inspectPollTimer: null,
       inspectAutoTimer: null,
       inspectPausedOnAnomaly: false,
+      inspectPlaybackPaused: false,
       // 多任务顺序回放
       taskQueue: [], // 待回放的任务列表
       currentTaskIndex: 0, // 当前回放的任务索引
@@ -659,6 +667,7 @@ export default {
         this.inspectIndex = 0
         this.inspectImages = []
         this.inspectPausedOnAnomaly = false
+        this.inspectPlaybackPaused = false
         this.startInspectTimers()
         await this.pollInspectImages()
 
@@ -875,7 +884,7 @@ export default {
       }
     },
     inspectTick() {
-      if (!this.currentInspectTaskId || this.inspectPausedOnAnomaly) return
+      if (!this.currentInspectTaskId || this.inspectPausedOnAnomaly || this.inspectPlaybackPaused) return
       if (!this.inspectImages.length) return
       const img = this.inspectImages[this.inspectIndex]
       if (!img) return
@@ -902,6 +911,10 @@ export default {
         // 当前任务图片回放完毕，检查下一个任务
         this.checkAndPlayNextTask()
       }
+    },
+
+    toggleInspectPlaybackPause() {
+      this.inspectPlaybackPaused = !this.inspectPlaybackPaused
     },
 
     jumpToLatestInspectImage() {
@@ -1652,41 +1665,69 @@ export default {
     async playTaskAlarms(task) {
       this.selectedHistoryTask = task
       this.currentInspectTaskId = null // 确保切换回轮播模式
-      console.log('🎬 开始回放任务告警:', task.external_task_id)
+      console.log('🎬 开始轮播异常图片（仅异常）:', task.external_task_id)
 
       try {
-        // 获取该任务的所有告警
+        // 🔥 只获取该任务的异常告警（通过 source_task 过滤）
         const res = await alarmApi.getAlarms({
-          source_task: task.id,
-          page_size: 100,
-          ordering: 'created_at'
+          source_task: task.id,  // 使用 source_task 参数过滤
+          page_size: 1000,       // 增加页面大小以获取所有异常
+          ordering: 'created_at' // 按创建时间排序
         })
         const alarms = this.normalizeList(res)
-        
+
         if (!alarms.length) {
-          ElMessage.warning('该任务暂无异常记录')
+          ElMessage.warning({
+            message: '该任务暂无异常记录',
+            duration: 3000
+          })
+          console.log('ℹ️ 该任务没有异常告警')
           return
         }
 
-        // 构建轮播数据
+        console.log(`✅ 找到 ${alarms.length} 个异常告警，开始轮播`)
+
+        // 🔥 构建轮播数据（只包含异常图片）
         this.flowSlides = alarms.map((alarm, idx) => ({
           ...alarm,
-          key: `${alarm.id || idx}-${idx}`,
+          key: `alarm-${alarm.id || idx}`,
           state: 'abnormal',
-          stateText: '异常',
-          hint: alarm.content || '检测到异常',
-          // 🔥 修复：优先使用 signed_url，否则图片无法加载
-          image_url: alarm.image_signed_url || alarm.image_url
+          stateText: '🚨 异常',
+          hint: alarm.content || 'AI检测到异常',
+          // 优先使用签名URL，否则使用原始URL
+          image_url: alarm.image_signed_url || alarm.image_url,
+          // 保留原始数据供调试
+          _debug: {
+            alarm_id: alarm.id,
+            task_id: task.id,
+            image_url: alarm.image_url,
+            signed_url: alarm.image_signed_url
+          }
         }))
 
+        // 初始化轮播
         this.activeIndex = 0
-        this.stopAuto()
-        this.startAuto()
+        this.stopAuto()  // 停止当前轮播
+        this.startAuto() // 启动新的轮播
 
-        ElMessage.success(`开始回放：${task.external_task_id}（${alarms.length}个异常）`)
+        ElMessage.success({
+          message: `🎬 开始轮播异常：${task.external_task_id || task.id}（共 ${alarms.length} 个异常）`,
+          duration: 3000,
+          showClose: true
+        })
+
+        console.log('🎊 轮播数据已准备完成:', {
+          异常数量: alarms.length,
+          当前索引: this.activeIndex,
+          第一个异常: alarms[0]
+        })
       } catch (err) {
-        console.error('❌ 加载任务告警失败:', err)
-        ElMessage.error('加载任务告警失败')
+        console.error('❌ 加载任务异常失败:', err)
+        const errorMsg = err.response?.data?.detail || err.message || '加载任务异常失败'
+        ElMessage.error({
+          message: `加载失败: ${errorMsg}`,
+          duration: 5000
+        })
       }
     },
 

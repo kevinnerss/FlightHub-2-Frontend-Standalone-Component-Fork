@@ -1418,6 +1418,58 @@ class InspectTaskViewSet(viewsets.ModelViewSet):
 
         return Response(InspectTaskSerializer(task).data)
 
+    @action(detail=True, methods=["delete", "post"])
+    def force_delete(self, request, pk=None):
+        """
+        强制删除任务及其所有关联数据
+        删除范围:
+        1. InspectTask (任务本身)
+        2. InspectImage (任务的所有图片)
+        3. Alarm (任务产生的所有告警)
+        4. 如果是子任务,需要考虑父任务状态
+        """
+        task = self.get_object()
+
+        # 统计即将删除的数据
+        image_count = InspectImage.objects.filter(inspect_task=task).count()
+        alarm_count = Alarm.objects.filter(wayline=task.wayline).count()
+
+        print(f"🗑️ [Force Delete] 准备删除任务: {task.external_task_id}")
+        print(f"   - 图片: {image_count} 张")
+        print(f"   - 告警: {alarm_count} 条")
+
+        # 1. 删除所有关联的 InspectImage
+        InspectImage.objects.filter(inspect_task=task).delete()
+        print(f"✅ 已删除 {image_count} 张图片记录")
+
+        # 2. 删除所有关联的 Alarm (通过 wayline 和 source_image 关联)
+        Alarm.objects.filter(source_image__inspect_task=task).delete()
+        print(f"✅ 已删除相关告警记录")
+
+        # 3. 记录父任务信息(如果是子任务)
+        parent_task = task.parent_task
+        external_id = task.external_task_id
+
+        # 4. 删除任务本身
+        task.delete()
+        print(f"✅ 已删除任务: {external_id}")
+
+        # 5. 如果是子任务,检查父任务是否还有其他子任务
+        if parent_task:
+            remaining_subs = parent_task.sub_tasks.count()
+            if remaining_subs == 0:
+                # 父任务没有子任务了,也删除父任务
+                parent_task.delete()
+                print(f"✅ 已删除空父任务: {parent_task.external_task_id}")
+            else:
+                print(f"ℹ️ 父任务还有 {remaining_subs} 个子任务,保留父任务")
+
+        return Response({
+            "detail": f"任务 {external_id} 及其所有关联数据已强制删除",
+            "deleted_images": image_count,
+            "deleted_alarms": alarm_count
+        }, status=200)
+
 
 class AlarmViewSet(viewsets.ModelViewSet):
     """保留你原本的 Search Fields"""

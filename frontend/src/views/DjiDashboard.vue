@@ -16,34 +16,6 @@
       </div>
     </div>
 
-    <div class="detect-type-summary">
-      <div class="detect-type-header">
-        <div class="detect-type-title">检测类型</div>
-        <div class="detect-type-subtitle">rail / contactline / bridge / protected_area</div>
-      </div>
-      <div class="detect-type-table-wrap">
-        <table class="detect-type-table">
-          <thead>
-          <tr>
-            <th>类型</th>
-            <th>英文</th>
-            <th>关键字</th>
-          </tr>
-          </thead>
-          <tbody>
-          <tr v-for="t in detectTypes" :key="t.code">
-            <td class="type-cell">
-              <span class="type-icon">{{ t.icon }}</span>
-              <span class="type-name">{{ t.name }}</span>
-            </td>
-            <td class="code-cell">{{ t.code }}</td>
-            <td class="keywords-cell">{{ t.keywords }}</td>
-          </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
     <!-- 主内容区 -->
     <div class="dashboard-content">
       <!-- 左侧面板 - 航线管理 -->

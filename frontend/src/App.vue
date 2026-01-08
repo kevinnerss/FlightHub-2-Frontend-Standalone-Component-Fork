@@ -8,11 +8,11 @@
           <div class="logo-icon">
             <img
                 src="@/assets/logo.png"
-                alt="FlightHub Logo"
+                alt="沈阳地铁低空智能巡检平台 Logo"
                 class="logo-img"
             />
           </div>
-          <span class="logo-text">FlightHub</span>
+          <span class="logo-text">沈阳地铁低空智能巡检平台</span>
         </div>
 
         <!-- 导航菜单 -->
@@ -22,7 +22,9 @@
               class="nav-item"
               :class="{ active: $route.path === '/main-view' }"
           >
-            <span class="nav-icon">🏠</span>
+            <span class="nav-icon">
+              <img :src="homeIcon" class="nav-icon-img" alt="首页" />
+            </span>
             <span class="nav-label">首页</span>
           </router-link>
 
@@ -31,7 +33,9 @@
               class="nav-item"
               :class="{ active: $route.path === '/' }"
           >
-            <span class="nav-icon">🎯</span>
+            <span class="nav-icon">
+              <img :src="dashboardIcon" class="nav-icon-img" alt="主控台" />
+            </span>
             <span class="nav-label">主控台</span>
           </router-link>
 
@@ -40,7 +44,9 @@
               class="nav-item"
               :class="{ active: $route.path === '/alarm-management' }"
           >
-            <span class="nav-icon">⚠️</span>
+            <span class="nav-icon">
+              <img :src="alarmIcon" class="nav-icon-img" alt="告警管理" />
+            </span>
             <span class="nav-label">告警管理</span>
           </router-link>
 
@@ -49,7 +55,9 @@
               class="nav-item"
               :class="{ active: $route.path === '/alarm-stats' }"
           >
-            <span class="nav-icon">📊</span>
+            <span class="nav-icon">
+              <img :src="alarmStatsIcon" class="nav-icon-img" alt="告警统计" />
+            </span>
             <span class="nav-label">告警统计</span>
           </router-link>
 
@@ -58,8 +66,19 @@
               class="nav-item"
               :class="{ active: $route.path === '/carousel-detection' }"
           >
-            <span class="nav-icon">🖼️</span>
-            <span class="nav-label">轮播检测</span>
+            <span class="nav-icon">
+              <img :src="detectIcon" class="nav-icon-img" alt="AI检测" />
+            </span>
+            <span class="nav-label">AI检测</span>
+          </router-link>
+
+          <router-link
+              to="/create-flight-task"
+              class="nav-item"
+              :class="{ active: $route.path === '/create-flight-task' }"
+          >
+            <span class="nav-icon">➕</span>
+            <span class="nav-label">创建任务</span>
           </router-link>
 
           <router-link
@@ -67,17 +86,10 @@
               class="nav-item"
               :class="{ active: $route.path === '/inspect-task-management' }"
           >
-            <span class="nav-icon">📋</span>
+            <span class="nav-icon">
+              <img :src="inspectTaskIcon" class="nav-icon-img" alt="巡检任务" />
+            </span>
             <span class="nav-label">巡检任务</span>
-          </router-link>
-
-          <router-link
-              to="/inspect-relationship"
-              class="nav-item"
-              :class="{ active: $route.path === '/inspect-relationship' }"
-          >
-            <span class="nav-icon">🔗</span>
-            <span class="nav-label">检测关系图</span>
           </router-link>
 
           <router-link
@@ -86,19 +98,12 @@
               class="nav-item"
               :class="{ active: $route.path === '/user-management' }"
           >
-            <span class="nav-icon">👥</span>
+            <span class="nav-icon">
+              <img :src="userManagementIcon" class="nav-icon-img" alt="人员管理" />
+            </span>
             <span class="nav-label">人员管理</span>
           </router-link>
 
-          <router-link
-              v-if="isAdmin"
-              to="/component-config"
-              class="nav-item"
-              :class="{ active: $route.path === '/component-config' }"
-          >
-            <span class="nav-icon">🛠️</span>
-            <span class="nav-label">组件配置</span>
-          </router-link>
         </nav>
 
         <!-- 用户信息区域 -->
@@ -129,10 +134,25 @@
 </template>
 
 <script>
+import detectIcon from '../pho/Common_AI检测.svg'
+import dashboardIcon from '../pho/主控台.svg'
+import homeIcon from '../pho/首页-copy.svg'
+import alarmIcon from '../pho/告警管理_实时告警.svg'
+import alarmStatsIcon from '../pho/告警统计.svg'
+import inspectTaskIcon from '../pho/巡检任务.svg'
+import userManagementIcon from '../pho/人员管理.svg'
+
 export default {
   name: "App",
   data() {
     return {
+      detectIcon,
+      dashboardIcon,
+      homeIcon,
+      alarmIcon,
+      alarmStatsIcon,
+      inspectTaskIcon,
+      userManagementIcon,
       isAuthenticated: false,
       isAdmin: false,
       currentUserName: "",
@@ -377,6 +397,13 @@ body {
   font-size: 18px;
   filter: grayscale(50%);
   transition: filter 0.3s ease;
+}
+
+.nav-icon-img {
+  width: 18px;
+  height: 18px;
+  display: block;
+  filter: invert(1) brightness(1.6);
 }
 
 .nav-item:hover .nav-icon,
