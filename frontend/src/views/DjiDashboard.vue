@@ -63,7 +63,6 @@
           <TaskProgressBar
               :progress="taskProgress"
               :current-task="currentTask"
-              :remaining-time="remainingTime"
               :completed-tasks="completedTasks"
               :total-tasks="totalTasks"
           />
@@ -218,11 +217,11 @@ export default {
         { name: '桥梁', code: 'bridge', icon: '🌉', keywords: 'bridge, 桥梁' },
         { name: '保护区', code: 'protected_area', icon: '🛡️', keywords: 'protected_area, 保护区' }
       ],
-      taskProgress: 65,
-      currentTask: '变电站设备检查',
-      remainingTime: '12:45',
-      completedTasks: 8,
-      totalTasks: 12,
+      taskProgress: 0,
+      currentTask: '未选择任务',
+      remainingTime: '',
+      completedTasks: 0,
+      totalTasks: 0,
       loading: false,
       error: '',
       globeVisible: true,
@@ -274,6 +273,10 @@ export default {
     })
   },
   beforeUnmount() {
+    if (this.viewer && this.progressListener) {
+      this.viewer.clock.onTick.removeEventListener(this.progressListener);
+      this.progressListener = null;
+    }
     if (this.fh2CheckTimer) {
       clearTimeout(this.fh2CheckTimer)
       this.fh2CheckTimer = null
@@ -564,7 +567,7 @@ export default {
       const Cesium = this.cesiumLib || window.Cesium;
       if (!this.viewer || !wayline?.waypoints?.length) return;
 
-      // 1. 清理工作
+      // 1. 清理工作 (实体、相机监听、进度监听)
       if (this.droneEntity) {
         this.viewer.entities.remove(this.droneEntity);
         this.droneEntity = null;
@@ -573,39 +576,48 @@ export default {
         this.viewer.scene.postUpdate.removeEventListener(this.chaseCameraListener);
         this.chaseCameraListener = null;
       }
+      // 【新增】清理进度条监听器
+      if (this.progressListener) {
+        this.viewer.clock.onTick.removeEventListener(this.progressListener);
+        this.progressListener = null;
+      }
 
       // ----------------------------------------------------------------
-      // 【步骤 1】数据分组 (Grouping)
-      // 将连续坐标相同的点，归纳为一个 "Group" (站点)
+      // 【新增】初始化进度条数据
+      // ----------------------------------------------------------------
+      this.totalTasks = wayline.waypoints.length; // 总任务数 = 动作点总数
+      this.completedTasks = 0;
+      this.taskProgress = 0;
+      this.remainingTime = ''; // 清空时间显示
+      this.currentTask = '正在执行飞行任务...';
+
+      // 用来存储 [时间点, 已完成数量] 的数组
+      const progressTimeline = [];
+      let globalActionCounter = 0; // 全局计数器
+
+      // ----------------------------------------------------------------
+      // 数据分组逻辑 (保持不变)
       // ----------------------------------------------------------------
       const groups = [];
       let currentGroup = null;
 
       wayline.waypoints.forEach((pt) => {
-        // 第一次循环，或者发现新点距离很远，就创建新组
         const isNewLocation = !currentGroup ||
             (Math.abs(pt.latitude - currentGroup.lat) > 0.0000001 ||
                 Math.abs(pt.longitude - currentGroup.lon) > 0.0000001);
 
         if (isNewLocation) {
-          // 开启一个新站点
           currentGroup = {
-            lat: pt.latitude,
-            lon: pt.longitude,
-            alt: pt.altitude,
-            // 记录该位置下所有的动作点数据
+            lat: pt.latitude, lon: pt.longitude, alt: pt.altitude,
             actions: [pt]
           };
           groups.push(currentGroup);
         } else {
-          // 还是在老地方，只是角度不一样，加入当前站点
           currentGroup.actions.push(pt);
         }
       });
 
-      console.log(`[Debug] 原始动作点: ${wayline.waypoints.length} -> 合并为站点: ${groups.length} 个`);
-
-      // 2. 初始化属性
+      // 初始化属性
       const positionProp = new Cesium.SampledPositionProperty();
       const orientationProp = new Cesium.SampledProperty(Cesium.Quaternion);
       const cameraOffsetProp = new Cesium.SampledProperty(Cesium.Cartesian3);
@@ -614,119 +626,107 @@ export default {
       orientationProp.setInterpolationOptions({ interpolationDegree: 1, interpolationAlgorithm: Cesium.LinearApproximation });
       cameraOffsetProp.setInterpolationOptions({ interpolationDegree: 1, interpolationAlgorithm: Cesium.LinearApproximation });
 
-      // 3. 配置参数
-      const flySpeed = 2; // 飞行速度
-      const modelHeadingOffset = Cesium.Math.toRadians(-90); // 模型修正
+      // 参数配置
+      const flySpeed = 10;
+      const modelHeadingOffset = Cesium.Math.toRadians(-90);
+      const offsetFar = new Cesium.Cartesian3(-80, 0, 30);
+      const offsetNear = new Cesium.Cartesian3(2, 0, 0);
 
-      // 视角配置
-      const offsetFar = new Cesium.Cartesian3(-8, 0, 3); // 第三人称
-      const offsetNear = new Cesium.Cartesian3(2, 0, 0);   // 特写
-
-      // 4. 构建时间轴
+      // 构建时间轴
       const startJulian = Cesium.JulianDate.now();
       let currentTime = startJulian.clone();
 
       // ==========================================
-      // 【步骤 2】外层循环：遍历物理站点 (Groups)
+      // 外层循环：物理站点
       // ==========================================
       for (let i = 0; i < groups.length; i++) {
         const group = groups[i];
-        const nextGroup = groups[i + 1]; // 下一个物理站点
+        const nextGroup = groups[i + 1];
 
-        // 当前站点的固定坐标
         const pos = Cesium.Cartesian3.fromDegrees(group.lon, group.lat, group.alt);
 
-        // A. 计算【飞行航向】 (Fly Heading) - 用于到达和离开
+        // 计算飞行航向
         let flyHeading = 0;
         if (nextGroup) {
           const nextPos = Cesium.Cartesian3.fromDegrees(nextGroup.lon, nextGroup.lat, nextGroup.alt);
           flyHeading = this.calculateHeading(pos, nextPos);
         } else {
-          // 最后一个点，沿用上一次
           flyHeading = this._lastFlyHeading || 0;
         }
-        this._lastFlyHeading = flyHeading; // 暂存
+        this._lastFlyHeading = flyHeading;
 
         const quatFly = Cesium.Transforms.headingPitchRollQuaternion(
-            pos,
-            new Cesium.HeadingPitchRoll(flyHeading + modelHeadingOffset, 0, 0)
+            pos, new Cesium.HeadingPitchRoll(flyHeading + modelHeadingOffset, 0, 0)
         );
 
-        // ----------------------------------------
-        // 阶段 0: 到达站点 (Arrive)
-        // ----------------------------------------
-        // 如果是第一个点，初始化状态；如果是后续点，这里是飞过来的终点
+        // 到达站点
         positionProp.addSample(currentTime, pos);
-        orientationProp.addSample(currentTime, quatFly); // 保持飞行姿态到达
+        orientationProp.addSample(currentTime, quatFly);
         cameraOffsetProp.addSample(currentTime, offsetFar);
 
         // ==========================================
-        // 【步骤 3】内层循环：遍历该站点的所有动作
+        // 内层循环：动作点
         // ==========================================
         for (let j = 0; j < group.actions.length; j++) {
           const actionPt = group.actions[j];
-
-          // 1. 计算当前动作的拍摄角度
           let aircraftHeadingInfo = Number(actionPt.aircraft_heading || actionPt.gimbal_yaw || 0);
-          // 转换角度 (根据你的模型朝向微调，这里假设是 -90 修正)
           let shootHeading = Cesium.Math.toRadians(-aircraftHeadingInfo) + modelHeadingOffset;
 
           const quatShoot = Cesium.Transforms.headingPitchRollQuaternion(
-              pos,
-              new Cesium.HeadingPitchRoll(shootHeading, 0, 0)
+              pos, new Cesium.HeadingPitchRoll(shootHeading, 0, 0)
           );
 
-          // 动作 A: 转头 (Rotate)
-          // 无论之前是刚飞过来(quatFly)，还是刚做完上一个动作(prevQuatShoot)，都花 1.5s 转到当前角度
-          currentTime = Cesium.JulianDate.addSeconds(currentTime, 1.5, new Cesium.JulianDate());
-          positionProp.addSample(currentTime, pos);
-          orientationProp.addSample(currentTime, quatShoot); // 【转头】
-          cameraOffsetProp.addSample(currentTime, offsetFar);
-
-          // 动作 B: 放大 (Zoom In)
+          // 动作序列
+          // 1. 转头
           currentTime = Cesium.JulianDate.addSeconds(currentTime, 1.5, new Cesium.JulianDate());
           positionProp.addSample(currentTime, pos);
           orientationProp.addSample(currentTime, quatShoot);
-          cameraOffsetProp.addSample(currentTime, offsetNear); // 【放大】
+          cameraOffsetProp.addSample(currentTime, offsetFar);
 
-          // 动作 C: 保持 (Hold)
+          // 2. 放大
+          currentTime = Cesium.JulianDate.addSeconds(currentTime, 1.5, new Cesium.JulianDate());
+          positionProp.addSample(currentTime, pos);
+          orientationProp.addSample(currentTime, quatShoot);
+          cameraOffsetProp.addSample(currentTime, offsetNear);
+
+          // 3. 保持
           currentTime = Cesium.JulianDate.addSeconds(currentTime, 2.0, new Cesium.JulianDate());
           positionProp.addSample(currentTime, pos);
           orientationProp.addSample(currentTime, quatShoot);
           cameraOffsetProp.addSample(currentTime, offsetNear);
 
-          // 动作 D: 缩小 (Zoom Out)
+          // 4. 缩小 (动作完成)
           currentTime = Cesium.JulianDate.addSeconds(currentTime, 1.5, new Cesium.JulianDate());
           positionProp.addSample(currentTime, pos);
           orientationProp.addSample(currentTime, quatShoot);
-          cameraOffsetProp.addSample(currentTime, offsetFar); // 【缩小】
-
-          // 【关键逻辑】
-          // 如果这还不是本站点的最后一个动作 (j < length - 1)
-          // 那么 loops 回去，直接开始下一个动作的 "Rotate"，不进行回正！
-        }
-
-        // ----------------------------------------
-        // 阶段 End: 离开站点前，回正 (Reset Heading)
-        // 只有当所有动作做完，且还有下一个站点要飞时，才回正
-        // ----------------------------------------
-        if (nextGroup) {
-          // 回正耗时 1秒
-          currentTime = Cesium.JulianDate.addSeconds(currentTime, 1.0, new Cesium.JulianDate());
-          positionProp.addSample(currentTime, pos);
-          orientationProp.addSample(currentTime, quatFly); // 【回正到飞行方向】
           cameraOffsetProp.addSample(currentTime, offsetFar);
 
-          // 飞行过程 (Travel)
+          // ----------------------------------------------------------
+          // 【新增】动作完成，记录此时的时间点和完成数
+          // ----------------------------------------------------------
+          globalActionCounter++;
+          progressTimeline.push({
+            time: currentTime.clone(), // 记录当前时刻
+            count: globalActionCounter
+          });
+        }
+
+        // 离开站点前回正
+        if (nextGroup) {
+          currentTime = Cesium.JulianDate.addSeconds(currentTime, 1.0, new Cesium.JulianDate());
+          positionProp.addSample(currentTime, pos);
+          orientationProp.addSample(currentTime, quatFly);
+          cameraOffsetProp.addSample(currentTime, offsetFar);
+
+          // 飞行
           const nextPos = Cesium.Cartesian3.fromDegrees(nextGroup.lon, nextGroup.lat, nextGroup.alt);
           const distance = Cesium.Cartesian3.distance(pos, nextPos);
           const duration = Math.max(distance / flySpeed, 0.1);
-
           currentTime = Cesium.JulianDate.addSeconds(currentTime, duration, new Cesium.JulianDate());
         }
       }
 
-      // 5. 实体创建 (保持不变)
+      // 5. 创建实体
       const stopJulian = currentTime.clone();
       const availability = new Cesium.TimeIntervalCollection([
         new Cesium.TimeInterval({
@@ -762,6 +762,32 @@ export default {
       this.viewer.clock.shouldAnimate = true;
 
       this.enableDynamicChaseCamera(this.droneEntity, cameraOffsetProp);
+
+      // ----------------------------------------------------------------
+      // 【新增】注册仿真进度监听器
+      // ----------------------------------------------------------------
+      this.progressListener = () => {
+        const now = this.viewer.clock.currentTime;
+
+        // 找到当前时间点对应的最近一个已完成动作
+        // 倒序查找，找到第一个时间 <= 当前时间的记录
+        let finishedCount = 0;
+        for (let k = progressTimeline.length - 1; k >= 0; k--) {
+          if (Cesium.JulianDate.compare(progressTimeline[k].time, now) <= 0) {
+            finishedCount = progressTimeline[k].count;
+            break;
+          }
+        }
+
+        // 更新 Vue 数据
+        this.completedTasks = finishedCount;
+        if (this.totalTasks > 0) {
+          this.taskProgress = Math.round((this.completedTasks / this.totalTasks) * 100);
+        }
+      };
+
+      // 绑定到 Cesium 时钟 tick 事件
+      this.viewer.clock.onTick.addEventListener(this.progressListener);
     },
     enableChaseCamera(entity, distance = 80, height = 30) {
       const Cesium = this.cesiumLib || window.Cesium;
