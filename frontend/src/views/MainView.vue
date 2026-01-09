@@ -99,6 +99,13 @@
                 <span class="chip-value">{{ status.value }}</span>
               </div>
             </div>
+            <div class="hero-summary">
+              <div v-for="status in safetyStatuses" :key="status.label" class="summary-chip">
+                <span class="chip-dot" :style="{ background: status.color }"></span>
+                <span class="chip-label">{{ status.label }}</span>
+                <span class="chip-value">{{ status.value }}</span>
+              </div>
+            </div>
           </div>
         </div>
 

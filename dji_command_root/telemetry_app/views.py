@@ -3020,17 +3020,55 @@ class FlightTaskProxyViewSet(viewsets.ViewSet):
             # 这里的路径取决于司空的真实 API，通常是 /openapi/v0.1/device
             # 如果需要分页，司空 API 可能需要 page/page_size 参数
             url = f"{base_url}/openapi/v0.1/device"
-            
+
             # 透传前端传来的 query params (比如 page_size)
             params = request.query_params
-            
+
             print(f"📡 [Proxy] Forwarding GET to {url}")
             resp = requests.get(url, headers=headers, params=params, timeout=10)
-            
+
             # 直接返回上游的 JSON
             return Response(resp.json(), status=resp.status_code)
         except Exception as e:
             print(f"❌ [Proxy Error] Fetch devices failed: {e}")
+            return Response({"code": 500, "msg": str(e)}, status=500)
+
+    @action(detail=False, methods=['get'], url_path='recent-devices')
+    def recent_devices(self, request):
+        """
+        获取最近使用的设备SN列表
+        用于创建任务页面的快速选择
+        """
+        try:
+            # 从 FlightTaskInfo 表获取最近使用的设备
+            # 按创建时间降序，去重，最多返回10个
+            from django.db.models import Max
+
+            recent_tasks = FlightTaskInfo.objects.filter(
+                sn__isnull=False
+            ).exclude(
+                sn=''
+            ).values('sn').annotate(
+                last_used=Max('created_at')
+            ).order_by('-last_used')[:10]
+
+            device_list = []
+            for task in recent_tasks:
+                sn = task['sn']
+                # 查找该SN最近的任务名称
+                task_info = FlightTaskInfo.objects.filter(sn=sn).order_by('-created_at').first()
+                device_list.append({
+                    'sn': sn,
+                    'name': task_info.name if task_info else sn,
+                    'last_used': task['last_used'].isoformat()
+                })
+
+            return Response({
+                "code": 0,
+                "data": device_list
+            })
+        except Exception as e:
+            print(f"❌ [Error] Get recent devices failed: {e}")
             return Response({"code": 500, "msg": str(e)}, status=500)
 
     @action(detail=False, methods=['post'], url_path='create')
@@ -3039,37 +3077,68 @@ class FlightTaskProxyViewSet(viewsets.ViewSet):
         try:
             headers, base_url = WaylineFingerprintManager.get_api_headers_and_host()
             url = f"{base_url}/openapi/v0.1/flight-task"
-            
+
             print(f"📡 [Proxy] Forwarding POST to {url}")
             # request.data 已经是解析后的 JSON (dict)
             resp = requests.post(url, headers=headers, json=request.data, timeout=10)
-            
+
             res_json = resp.json()
-            
+
             # 如果创建成功，保存到数据库
             if resp.status_code == 200 and res_json.get('code') == 0:
                 try:
                     data = res_json.get('data', {})
                     task_uuid = data.get('task_uuid')
-                    
+
                     if task_uuid:
                         # 提取参数
                         req_data = request.data
+                        # 兼容前端发送的 wayline_uuid 和 wayline_id 两种字段名
+                        wayline_id = req_data.get('wayline_uuid') or req_data.get('wayline_id')
                         FlightTaskInfo.objects.create(
                             task_uuid=task_uuid,
                             name=req_data.get('name', '未命名任务'),
                             sn=req_data.get('sn'),
-                            wayline_id=req_data.get('wayline_id'),
+                            wayline_id=wayline_id,
                             params=req_data,
                             status='created'
                         )
-                        print(f"✅ [DB] Flight task recorded: {task_uuid}")
+                        print(f"✅ [DB] Flight task recorded: {task_uuid}, wayline_id: {wayline_id}")
                 except Exception as db_e:
                     print(f"⚠️ [DB Error] Failed to record flight task: {db_e}")
-            
+
             return Response(res_json, status=resp.status_code)
         except Exception as e:
             print(f"❌ [Proxy Error] Create task failed: {e}")
+            return Response({"code": 500, "msg": str(e)}, status=500)
+
+    @action(detail=True, methods=['post'], url_path='command')
+    def device_command(self, request, device_sn=None):
+        """
+        设备控制命令 (POST /openapi/v0.1/device/{device_sn}/command)
+        支持: return_home, cancel_return_home, flighttask_pause, flighttask_recovery
+        """
+        try:
+            headers, base_url = WaylineFingerprintManager.get_api_headers_and_host()
+            url = f"{base_url}/openapi/v0.1/device/{device_sn}/command"
+
+            # 获取命令参数
+            device_command = request.data.get('device_command')
+
+            if not device_command:
+                return Response({"code": 400, "msg": "缺少 device_command 参数"}, status=400)
+
+            print(f"📡 [Proxy] Device Command: {device_command} -> {device_sn}")
+
+            # 转发请求到司空API
+            resp = requests.post(url, headers=headers, json=request.data, timeout=10)
+
+            res_json = resp.json()
+            print(f"✅ [Proxy] Command response: {res_json}")
+
+            return Response(res_json, status=resp.status_code)
+        except Exception as e:
+            print(f"❌ [Proxy Error] Device command failed: {e}")
             return Response({"code": 500, "msg": str(e)}, status=500)
 
 

@@ -84,11 +84,16 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS('✅ 连接成功! 正在订阅主题...'))
 
             # 优化：只订阅必要的 Topic，减少无用消息处理压力
+            # 🔥 修正：司空实际发送的 Topic 前缀是 thing/product
             topics = [
-                ("sys/product/+/device/+/osd", 0),  # 实时位置信息
-                ("sys/product/+/device/+/events", 1),  # 告警与事件
-                ("sys/product/+/device/+/services_reply", 1),  # 服务响应（含文件上传回调）
-                ("sys/product/+/device/+/requests", 0)  # 下行指令（可选，用于调试）
+                ("thing/product/+/osd", 0),  # 实时位置信息（机场OSD）
+                ("thing/product/+/events", 1),  # 告警与事件
+                ("thing/product/+/services_reply", 1),  # 服务响应（含文件上传回调）
+                ("thing/product/+/requests", 0),  # 下行指令（可选，用于调试）
+                # 兼容旧格式（以防万一）
+                ("sys/product/+/device/+/osd", 0),
+                ("sys/product/+/device/+/events", 1),
+                ("sys/product/+/device/+/services_reply", 1),
             ]
             client.subscribe(topics)
             self.stdout.write(f"   - 已订阅 {len(topics)} 类核心主题")
@@ -108,25 +113,42 @@ class Command(BaseCommand):
             payload = msg.payload.decode('utf-8')
             data = json.loads(payload)
 
+            # 🔥 调试：打印收到的所有消息（前100条）
+            if not hasattr(self, 'message_count'):
+                self.message_count = 0
+
+            if self.message_count < 100 or self.debug_mode:
+                self.message_count += 1
+                print(f"\n📨 [消息 #{self.message_count}] Topic: {msg.topic}")
+                print(f"   Payload (前500字符): {str(data)[:500]}...")
+
             # 1. 处理位置信息 (高频数据，同步快速处理)
             if self.is_position_data(msg.topic, data):
+                print(f"   ✅ 识别为位置数据 ->")
                 self.handle_position_data(data, msg.topic)
                 return
 
             # 2. 判断是否为文件上传事件
             if self.is_upload_event(data):
+                print(f"   ✅ 识别为上传事件 ->")
                 # self.stdout.write(f"📨 收到潜在文件消息: {msg.topic}")
 
                 # ⚠️ 关键修改：开启新线程进行下载，坚决不阻塞 MQTT 主循环
                 # daemon=True 表示主程序退出时子线程自动结束
                 t = threading.Thread(target=self._process_download_thread, args=(data, msg.topic), daemon=True)
                 t.start()
+            else:
+                if self.message_count < 10 or self.debug_mode:
+                    print(f"   ⚠️ 未识别的消息类型")
 
-        except json.JSONDecodeError:
-            pass
+        except json.JSONDecodeError as e:
+            print(f"❌ JSON解析失败: {e}")
+            print(f"   原始数据: {msg.payload[:200]}")
         except Exception as e:
             if self.debug_mode:
                 self.stdout.write(self.style.ERROR(f"处理消息异常: {e}"))
+            else:
+                print(f"❌ 消息处理异常: {e}")
 
     # ================= 业务逻辑区 =================
 
@@ -220,58 +242,76 @@ class Command(BaseCommand):
             from telemetry_app.models import DronePosition
         except ImportError:
             # 如果没有这个 app，直接返回，避免报错
+            print("❌ 模型导入失败：telemetry_app.models.DronePosition")
             return
 
         try:
             payload = data.get('data', data)
             if not isinstance(payload, dict):
+                print(f"   ⚠️ payload不是dict: {type(payload)}")
                 return
+
+            print(f"   📦 解析payload:")
+            print(f"      - payload keys: {list(payload.keys())}")
 
             lat = payload.get('latitude') or payload.get('lat')
             lon = payload.get('longitude') or payload.get('lon')
             alt = payload.get('height') or payload.get('altitude')
 
-            if lat and lon:
-                # --- 增强的过滤逻辑 (User Request) ---
-                # 1. 获取 SN 和 Gateway
-                sn = data.get('sn')
-                gateway_raw = data.get('gateway')
+            print(f"      - 纬度: {lat}, 经度: {lon}, 高度: {alt}")
 
-                # 2. 解析 Gateway SN (可能是 dict 也可能是 str)
-                gateway_sn = None
-                if isinstance(gateway_raw, dict):
-                    gateway_sn = gateway_raw.get('sn')
-                elif isinstance(gateway_raw, str):
-                    gateway_sn = gateway_raw
+            if not (lat and lon):
+                print(f"   🚫 缺少位置信息 (lat={lat}, lon={lon})")
+                return
 
-                # 3. 过滤规则：
-                #    规则A: 如果没有 SN，通常是机场心跳包 -> 忽略
-                #    规则B: 如果 SN == Gateway，是机场自身位置 -> 忽略
-                if not sn:
-                    # if self.debug_mode:
-                    #     print(f"🚫 [OSD] 忽略无SN消息 (Gateway: {gateway_sn})")
+            # --- 增强的过滤逻辑 (User Request) ---
+            # 1. 获取 SN 和 Gateway
+            sn = data.get('sn')
+            gateway_raw = data.get('gateway')
+
+            print(f"   🔍 过滤检查:")
+            print(f"      - SN: {sn}")
+            print(f"      - Gateway: {gateway_raw}")
+
+            # 2. 从 Topic 中提取设备 SN
+            # Topic 格式: thing/product/设备SN/osd
+            topic_sn = None
+            if '/osd' in topic or '/events' in topic:
+                parts = topic.split('/')
+                if len(parts) >= 3:
+                    topic_sn = parts[2]
+
+            print(f"      - Topic中的设备SN: {topic_sn}")
+
+            # 3. 过滤规则：
+            #    规则A: 如果消息中没有 sn 字段,尝试从 Topic 提取
+            #    规则B: 如果都没有，才是真正的无效消息 -> 忽略
+            if not sn:
+                if topic_sn:
+                    sn = topic_sn
+                    print(f"   ℹ️ 消息中无SN字段,使用Topic中的SN: {sn}")
+                else:
+                    print(f"   🚫 [规则A] 忽略无SN消息")
                     return
 
-                if gateway_sn and sn == gateway_sn:
-                    # if self.debug_mode:
-                    #     print(f"🚫 [OSD] 忽略机场自身位置 (SN: {sn})")
-                    return
+            # 4. 确认通过过滤，使用 SN
+            device_sn = sn
+            print(f"   ✅ 过滤通过！准备写入数据库...")
 
-                # 4. 确认通过过滤，使用 SN
-                device_sn = sn
-
-                DronePosition.objects.create(
-                    device_sn=device_sn,
-                    latitude=lat,
-                    longitude=lon,
-                    altitude=alt if alt else 0,
-                    raw_data=data,
-                    timestamp=timezone.now()
-                )
-                # 只有在 debug 模式下才打印 OSD 日志，防止刷屏
-                if self.debug_mode:
-                    print(f"📍 OSD: {device_sn} -> {lat}, {lon}")
+            DronePosition.objects.create(
+                device_sn=device_sn,
+                latitude=lat,
+                longitude=lon,
+                altitude=alt if alt else 0,
+                raw_data=data,
+                timestamp=timezone.now(),
+                mqtt_topic=topic
+            )
+            print(f"   ✅ 写入成功！{device_sn} -> ({lat}, {lon}, {alt}m)")
 
         except Exception as e:
             # 数据库错误不应中断 MQTT 循环
-            print(f"DB Error: {e}")
+            import traceback
+            print(f"❌ 数据库错误: {e}")
+            print(f"   详细错误:")
+            traceback.print_exc()

@@ -147,10 +147,14 @@
               <span class="detail-label">航线信息</span>
               <span class="detail-value">{{ currentAlarm.wayline?.name || currentAlarm.wayline_details?.name || '未知航线' }}</span>
             </div>
-            <div v-if="currentAlarm.image_url" class="detail-item full-width">
+            <div v-if="currentAlarm.image_signed_url || currentAlarm.image_url" class="detail-item full-width">
               <span class="detail-label">告警图片</span>
               <div class="alarm-image">
-                <img :src="currentAlarm.image_url" alt="告警图片" />
+                <img
+                  :src="currentAlarm.image_signed_url || currentAlarm.image_url"
+                  alt="告警图片"
+                  @error="handleImageError"
+                />
               </div>
             </div>
           </div>
@@ -942,6 +946,11 @@ export default {
     handleViewAlarmDetail(alarm) {
       this.currentAlarm = alarm;
       this.showAlarmDetail = true;
+    },
+
+    handleImageError(event) {
+      // 图片加载失败时显示占位图
+      event.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="300"%3E%3Crect fill="%23ddd" width="400" height="300"/%3E%3Ctext fill="%23999" x="50%25" y="50%25" text-anchor="middle" dy=".3em"%3E图片加载失败%3C/text%3E%3C/svg%3E';
     },
 
     async handleProcessAlarm(alarmId) {
