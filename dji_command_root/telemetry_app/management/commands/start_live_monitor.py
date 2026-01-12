@@ -23,40 +23,47 @@ class Command(BaseCommand):
         # ================= 配置区 =================
         # Django (backend) 访问 ZLM 的内部地址
         ZLM_API_HOST = "http://zlm:80"
-        ZLM_SECRET = "123456"
+        ZLM_SECRET = "123456"  # 🔥 修复：与docker-compose中ZLM配置一致
         # =========================================
 
         # 1. 准备任务结构
         today_str = datetime.datetime.now().strftime('%Y%m%d')
-        parent_task_name = f"{today_str}保护区直播汇总"
+
+        # 🔥 修改：使用与其他检测类型统一的父任务命名规则
+        parent_task_id = f"{today_str}巡检任务"
+
         bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "dji")
 
-        # A. 创建/获取父任务
+        # A. 创建/获取父任务（与其他检测类型一致）
         parent_task, _ = InspectTask.objects.get_or_create(
-            external_task_id=parent_task_name,
+            external_task_id=parent_task_id,
             defaults={
+                "detect_status": "pending",  # 🔥 改为pending，与其他任务一致
                 "bucket": bucket_name,
-                "detect_status": "done",
-                "prefix_list": []
+                "prefix_list": []  # 父任务没有具体路径
             }
         )
 
-        # B. 确保有“保护区检测”这个分类
+        # B. 确保有"保护区检测"这个分类
         category, _ = AlarmCategory.objects.get_or_create(
             code="protected_area",
             defaults={"name": "保护区", "match_keyword": "保护区"}
         )
 
-        # C. 创建本次直播的子任务
+        # C. 创建本次直播的子任务（命名与其他检测类型一致）
         now_time = datetime.datetime.now().strftime('%H%M%S')
-        child_task_name = f"直播_{stream_id}_{now_time}"
+        sub_task_id = f"{today_str}保护区检测直播_{stream_id}_{now_time}"
 
-        # 定义上传路径前缀 (修复了之前的变量未定义问题)
-        virtual_prefix = f"fh_sync/live/{parent_task_name}/{child_task_name}/"
+        # 定义上传路径前缀
+        virtual_prefix = f"fh_sync/live/{today_str}巡检任务/{sub_task_id}/"
+
+        # 🔥 新增：设置dji_task_name为用户友好的任务名称
+        dji_task_name = f"保护区检测-{stream_id}"
 
         current_task = InspectTask.objects.create(
             parent_task=parent_task,
-            external_task_id=child_task_name,
+            external_task_id=sub_task_id,
+            dji_task_name=dji_task_name,  # 🔥 新增：用户友好的任务名称
             bucket=bucket_name,
             prefix_list=[virtual_prefix],
             detect_category=category,
@@ -64,7 +71,7 @@ class Command(BaseCommand):
         )
 
         print(f"🚀 [监听启动] Server: {ZLM_API_HOST} | Stream: {stream_id}")
-        print(f"📂 [任务创建] {parent_task_name} -> {child_task_name}")
+        print(f"📂 [任务创建] [{parent_task_id}] -> [{sub_task_id}]")
 
         s3 = get_minio_client()
 

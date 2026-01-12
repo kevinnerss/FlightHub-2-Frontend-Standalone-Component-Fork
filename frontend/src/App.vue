@@ -93,6 +93,15 @@
           </router-link>
 
           <router-link
+              to="/dock-monitor"
+              class="nav-item"
+              :class="{ active: $route.path === '/dock-monitor' }"
+          >
+            <span class="nav-icon">🏭</span>
+            <span class="nav-label">机场监控</span>
+          </router-link>
+
+          <router-link
               v-if="isAdmin"
               to="/user-management"
               class="nav-item"

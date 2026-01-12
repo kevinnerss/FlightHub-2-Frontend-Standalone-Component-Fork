@@ -14,6 +14,7 @@ from .views import (
     LiveMonitorViewSet,
     DronePositionViewSet,
     FlightTaskProxyViewSet,
+    DockStatusViewSet,
 )
 from . import views
 router = DefaultRouter()
@@ -30,6 +31,7 @@ router.register(r'inspect-tasks', InspectTaskViewSet, basename='inspect-task')
 router.register(r'live-monitor', LiveMonitorViewSet, basename='live-monitor')
 router.register(r'drone-positions', DronePositionViewSet, basename='drone-position')
 router.register(r'flight-task-proxy', FlightTaskProxyViewSet, basename='flight-task-proxy')
+router.register(r'dock-status', DockStatusViewSet, basename='dock-status')
 
 urlpatterns = [
     path('scan_candidate_folders', views.scan_candidate_folders),

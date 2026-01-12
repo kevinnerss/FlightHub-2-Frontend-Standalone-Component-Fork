@@ -19,6 +19,7 @@ from .models import (
     InspectTask,
     InspectImage,
     DronePosition,
+    DockStatus,
 )
 
 
@@ -259,9 +260,12 @@ class InspectTaskSerializer(serializers.ModelSerializer):
     detect_category_code = serializers.CharField(source='detect_category.code', read_only=True)
     category_details = AlarmCategorySerializer(source='detect_category', read_only=True)
     parent_task_details = serializers.SerializerMethodField()
+    sub_tasks_list = serializers.SerializerMethodField()  # 🔥 新增：子任务列表
     alarm_count = serializers.SerializerMethodField()
     total_images = serializers.SerializerMethodField()
     completed_images = serializers.SerializerMethodField()
+    display_name = serializers.SerializerMethodField()  # 🔥 新增：统一显示名称
+    is_parent_task = serializers.SerializerMethodField()  # 🔥 新增：是否为父任务
 
     class Meta:
         model = InspectTask
@@ -269,21 +273,60 @@ class InspectTaskSerializer(serializers.ModelSerializer):
             'id', 'wayline', 'wayline_details', 'external_task_id', 'bucket', 'prefix_list',
             'started_at', 'finished_at', 'expire_at', 'detect_category', 'detect_category_name',
             'detect_category_code', 'category_details', 'detect_status', 'is_cleaned',
-            'created_at', 'parent_task', 'parent_task_details',
-            'dji_task_uuid', 'dji_task_name', 'last_image_uploaded_at',  # 🔥 新增字段
-            'device_sn',  # 🔥 设备SN
-            'alarm_count',  # 🔥 聚合字段
-            'total_images', 'completed_images', # 🔥 进度字段
+            'created_at', 'parent_task', 'parent_task_details', 'sub_tasks_list',
+            'dji_task_uuid', 'dji_task_name', 'last_image_uploaded_at',
+            'device_sn',
+            'alarm_count',
+            'total_images', 'completed_images',
+            'display_name', 'is_parent_task',  # 🔥 新增字段
         ]
         read_only_fields = ['id', 'detect_status', 'is_cleaned', 'created_at', 'parent_task']
+
+    def get_is_parent_task(self, obj):
+        """判断是否为父任务（有子任务且没有真实路径）"""
+        return obj.sub_tasks.exists() or (not obj.prefix_list or len(obj.prefix_list) == 0)
+
+    def get_display_name(self, obj):
+        """
+        统一的显示名称
+        - 父任务：显示 external_task_id (格式: 20250110巡检任务)
+        - 子任务：优先显示 dji_task_name，其次 external_task_id
+        """
+        if self.get_is_parent_task(obj):
+            # 父任务：显示日期+巡检任务
+            return obj.external_task_id or f"{obj.created_at.strftime('%Y%m%d')}巡检任务"
+        else:
+            # 子任务：优先用户友好名称
+            return obj.dji_task_name or obj.external_task_id or f"任务-{obj.id}"
 
     def get_parent_task_details(self, obj):
         if obj.parent_task:
             return {
                 'id': obj.parent_task.id,
                 'external_task_id': obj.parent_task.external_task_id,
+                'display_name': self.get_display_name(obj.parent_task),
             }
         return None
+
+    def get_sub_tasks_list(self, obj):
+        """获取子任务列表（用于前端展示）"""
+        if not obj.sub_tasks.exists():
+            return []
+
+        sub_tasks = obj.sub_tasks.all().order_by('-created_at')
+        return [
+            {
+                'id': task.id,
+                'external_task_id': task.external_task_id,
+                'display_name': self.get_display_name(task),
+                'detect_status': task.detect_status,
+                'detect_category_name': task.detect_category.name if task.detect_category else None,
+                'wayline_name': task.wayline.name if task.wayline else None,
+                'device_sn': task.device_sn,
+                'created_at': task.created_at,
+            }
+            for task in sub_tasks
+        ]
 
     def get_alarm_count(self, obj):
         """
@@ -307,9 +350,20 @@ class InspectTaskSerializer(serializers.ModelSerializer):
         return cnt
 
     def get_total_images(self, obj):
+        # 父任务：统计所有子任务的图片
+        if self.get_is_parent_task(obj):
+            return InspectImage.objects.filter(inspect_task__in=obj.sub_tasks.all()).count()
+        # 子任务：统计自己的图片
         return obj.images.count()
 
     def get_completed_images(self, obj):
+        # 父任务：统计所有子任务的完成图片
+        if self.get_is_parent_task(obj):
+            return InspectImage.objects.filter(
+                inspect_task__in=obj.sub_tasks.all(),
+                detect_status='done'
+            ).count()
+        # 子任务：统计自己的完成图片
         return obj.images.filter(detect_status='done').count()
 
 
@@ -395,3 +449,69 @@ class DronePositionSerializer(serializers.ModelSerializer):
             "raw_data", "mqtt_topic", "timestamp", "created_at"
         ]
         read_only_fields = ["id", "created_at"]
+
+
+# ======================================================================
+# 🏭 机场名称全局映射字典
+# ======================================================================
+DOCK_NAME_MAPPING = {
+    "8UUXN4900A052C": "工业大学机场",
+    "8UUXN4R00A06Q6": "马贝机场",
+}
+
+
+def get_dock_display_name(dock_sn):
+    """
+    根据机场SN获取显示名称
+    如果映射表中没有,返回 SN 本身
+    """
+    return DOCK_NAME_MAPPING.get(dock_sn, dock_sn)
+
+
+class DockStatusSerializer(serializers.ModelSerializer):
+    """
+    机场状态序列化器
+    用于API返回机场实时状态
+    """
+    storage_percent = serializers.SerializerMethodField()
+    online_status = serializers.SerializerMethodField()
+    power_status = serializers.SerializerMethodField()
+    display_name = serializers.SerializerMethodField()  # 🔥 新增：统一显示名称
+
+    class Meta:
+        model = DockStatus
+        fields = [
+            "id", "dock_sn", "dock_name", "display_name", "latitude", "longitude", "height",
+            "environment_temperature", "temperature", "humidity", "wind_speed", "rainfall",
+            "mode_code", "cover_state", "putter_state", "supplement_light_state", "emergency_stop_state",
+            "electric_supply_voltage", "working_voltage", "working_current",
+            "backup_battery_voltage", "backup_battery_temperature", "backup_battery_switch",
+            "drone_in_dock", "drone_charge_state", "drone_battery_percent", "drone_sn",
+            "network_state_type", "network_quality", "network_rate",
+            "storage_total", "storage_used", "storage_percent",
+            "job_number", "acc_time", "activation_time",
+            "alarm_state", "is_online", "online_status", "power_status",
+            "last_update_time", "created_at", "updated_at"
+        ]
+        read_only_fields = ["id", "created_at", "updated_at", "storage_percent", "online_status", "power_status", "display_name"]
+
+    def get_display_name(self, obj):
+        """获取机场显示名称（优先使用映射表，其次使用 dock_name，最后使用 dock_sn）"""
+        return get_dock_display_name(obj.dock_sn) if obj.dock_sn in DOCK_NAME_MAPPING else (obj.dock_name or obj.dock_sn)
+
+    def get_storage_percent(self, obj):
+        """计算存储使用百分比"""
+        if obj.storage_total and obj.storage_total > 0:
+            return round((obj.storage_used / obj.storage_total) * 100, 2)
+        return 0
+
+    def get_online_status(self, obj):
+        """获取在线状态文本"""
+        return "在线" if obj.is_online else "离线"
+
+    def get_power_status(self, obj):
+        """计算电源状态"""
+        if obj.working_voltage and obj.working_current:
+            power = (obj.working_voltage / 1000) * (obj.working_current / 1000)  # 转换为瓦特
+            return round(power, 2)
+        return 0

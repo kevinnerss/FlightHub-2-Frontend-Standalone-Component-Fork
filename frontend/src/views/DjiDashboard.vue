@@ -1491,7 +1491,9 @@ export default {
 .dji-placeholder {
   padding: 40px 20px;
   text-align: center;
-  color: #64748b;
+  color: #94a3b8;
+  background: rgba(10, 14, 39, 0.6);
+  border-radius: 12px;
 }
 
 /* 中间主视图 */

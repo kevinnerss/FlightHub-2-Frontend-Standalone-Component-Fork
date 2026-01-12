@@ -611,122 +611,12 @@ export default {
 <style scoped>
 .command-center {
   min-height: 100vh;
-  background: #000;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: #e2e8f0;
   padding: 20px;
   box-sizing: border-box;
   position: relative;
   overflow: hidden;
-}
-
-/* 星空背景 - 大量星星 */
-.command-center::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-image:
-    radial-gradient(1px 1px at 10% 10%, white, transparent),
-    radial-gradient(1px 1px at 20% 15%, white, transparent),
-    radial-gradient(2px 2px at 30% 8%, white, transparent),
-    radial-gradient(1px 1px at 40% 25%, white, transparent),
-    radial-gradient(1px 1px at 50% 12%, white, transparent),
-    radial-gradient(2px 2px at 60% 30%, white, transparent),
-    radial-gradient(1px 1px at 70% 5%, white, transparent),
-    radial-gradient(1px 1px at 80% 18%, white, transparent),
-    radial-gradient(2px 2px at 90% 22%, white, transparent),
-    radial-gradient(1px 1px at 15% 40%, white, transparent),
-    radial-gradient(1px 1px at 25% 50%, white, transparent),
-    radial-gradient(2px 2px at 35% 45%, white, transparent),
-    radial-gradient(1px 1px at 45% 55%, white, transparent),
-    radial-gradient(1px 1px at 55% 48%, white, transparent),
-    radial-gradient(2px 2px at 65% 52%, white, transparent),
-    radial-gradient(1px 1px at 75% 42%, white, transparent),
-    radial-gradient(1px 1px at 85% 58%, white, transparent),
-    radial-gradient(2px 2px at 95% 46%, white, transparent),
-    radial-gradient(1px 1px at 12% 70%, white, transparent),
-    radial-gradient(1px 1px at 22% 75%, white, transparent),
-    radial-gradient(2px 2px at 32% 82%, white, transparent),
-    radial-gradient(1px 1px at 42% 68%, white, transparent),
-    radial-gradient(1px 1px at 52% 78%, white, transparent),
-    radial-gradient(2px 2px at 62% 72%, white, transparent),
-    radial-gradient(1px 1px at 72% 85%, white, transparent),
-    radial-gradient(1px 1px at 82% 77%, white, transparent),
-    radial-gradient(2px 2px at 92% 88%, white, transparent),
-    radial-gradient(1px 1px at 18% 92%, white, transparent),
-    radial-gradient(1px 1px at 38% 95%, white, transparent),
-    radial-gradient(1px 1px at 58% 90%, white, transparent),
-    radial-gradient(1px 1px at 78% 94%, white, transparent),
-    radial-gradient(1px 1px at 5% 35%, white, transparent),
-    radial-gradient(1px 1px at 95% 65%, white, transparent),
-    radial-gradient(2px 2px at 8% 60%, white, transparent),
-    radial-gradient(1px 1px at 88% 28%, white, transparent);
-  background-size: 200% 200%;
-  background-position: 0% 0%;
-  animation: stars 80s linear infinite, twinkle 3s ease-in-out infinite;
-  pointer-events: none;
-  opacity: 0.9;
-  z-index: 0;
-}
-
-@keyframes stars {
-  from {
-    transform: translateY(0);
-  }
-  to {
-    transform: translateY(-100px);
-  }
-}
-
-@keyframes twinkle {
-  0%, 100% {
-    opacity: 0.9;
-  }
-  50% {
-    opacity: 0.5;
-  }
-}
-
-/* 星轨动画层 */
-.command-center::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: 
-    linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8) 50%, transparent) no-repeat -100% 20% / 30% 1px,
-    linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8) 50%, transparent) no-repeat -100% 45% / 40% 1px,
-    linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8) 50%, transparent) no-repeat -100% 70% / 35% 1px,
-    linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8) 50%, transparent) no-repeat -100% 85% / 25% 1px,
-    linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8) 50%, transparent) no-repeat -100% 10% / 30% 1px;
-  animation: shooting-star 8s linear infinite;
-  pointer-events: none;
-  z-index: 1;
-}
-
-@keyframes shooting-star {
-  0% {
-    background-position: -100% 20%, -100% 45%, -100% 70%, -100% 85%, -100% 10%;
-  }
-  20% {
-    background-position: 120% 20%, -100% 45%, -100% 70%, -100% 85%, -100% 10%;
-  }
-  40% {
-    background-position: 120% 20%, 120% 45%, -100% 70%, -100% 85%, -100% 10%;
-  }
-  60% {
-    background-position: 120% 20%, 120% 45%, 120% 70%, -100% 85%, -100% 10%;
-  }
-  80% {
-    background-position: 120% 20%, 120% 45%, 120% 70%, 120% 85%, -100% 10%;
-  }
-  100% {
-    background-position: 120% 20%, 120% 45%, 120% 70%, 120% 85%, 120% 10%;
-  }
 }
 
 /* 顶部标题栏 */
@@ -735,14 +625,14 @@ export default {
   justify-content: space-between;
   align-items: center;
   padding: 20px 40px;
-  background: rgba(26, 31, 58, 0.3);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(0, 212, 255, 0.15);
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border: none;
   border-radius: 12px;
   margin-bottom: 20px;
   position: relative;
   z-index: 1;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
 }
 
 .header-left, .header-right {

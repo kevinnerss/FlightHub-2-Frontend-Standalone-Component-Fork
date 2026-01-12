@@ -291,7 +291,7 @@ export default {
           start_date: this.formatDateParam(start),
           end_date: this.formatDateParam(end),
         });
-        this.buildSafetyStatsFromAlarms(alarms);
+        this.buildSafetyStatsFromAlarms(alarms, start);
       } catch (err) {
         console.warn("加载安全运行天数失败", err);
         this.safetyStats = {
@@ -335,20 +335,26 @@ export default {
       }
       return null;
     },
-    buildSafetyStatsFromAlarms(alarms) {
+    buildSafetyStatsFromAlarms(alarms, windowStart = null) {
       const todayKey = this.formatDateParam(new Date());
       const todayAlarms = alarms.filter((item) => this.formatDateParam(this.parsePlainDate(item.created_at)) === todayKey).length;
       const monthAlarms = alarms.filter((item) => this.isInCurrentMonth(item.created_at)).length;
       const totalAlarms = alarms.length;
 
-      const oldest = alarms.reduce((oldestTs, alarm) => {
+      const latest = alarms.reduce((latestTs, alarm) => {
         const ts = this.parsePlainDate(alarm.created_at);
-        if (Number.isNaN(ts.getTime())) return oldestTs;
-        if (!oldestTs) return ts;
-        return ts < oldestTs ? ts : oldestTs;
+        if (Number.isNaN(ts.getTime())) return latestTs;
+        if (!latestTs) return ts;
+        return ts > latestTs ? ts : latestTs;
       }, null);
 
-      const safetyDays = oldest ? Math.max(Math.floor((Date.now() - oldest.getTime()) / (1000 * 60 * 60 * 24)), 0) : 0;
+      const dayMs = 1000 * 60 * 60 * 24;
+      let safetyDays = 0;
+      if (latest) {
+        safetyDays = Math.max(Math.floor((Date.now() - latest.getTime()) / dayMs), 0);
+      } else if (windowStart instanceof Date && !Number.isNaN(windowStart.getTime())) {
+        safetyDays = Math.max(Math.floor((Date.now() - windowStart.getTime()) / dayMs), 0);
+      }
 
       this.safetyStats = {
         safetyDays,

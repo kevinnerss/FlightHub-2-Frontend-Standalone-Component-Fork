@@ -235,14 +235,14 @@ class Command(BaseCommand):
     def handle_position_data(self, data, topic):
         """
         处理位置数据入库
-        注意：此处需要 import 你的 DronePosition 模型
+        同时处理机场状态和无人机位置
         """
         # 避免未导入模型报错
         try:
-            from telemetry_app.models import DronePosition
+            from telemetry_app.models import DronePosition, DockStatus
         except ImportError:
             # 如果没有这个 app，直接返回，避免报错
-            print("❌ 模型导入失败：telemetry_app.models.DronePosition")
+            print("❌ 模型导入失败：telemetry_app.models.DronePosition or DockStatus")
             return
 
         try:
@@ -259,10 +259,6 @@ class Command(BaseCommand):
             alt = payload.get('height') or payload.get('altitude')
 
             print(f"      - 纬度: {lat}, 经度: {lon}, 高度: {alt}")
-
-            if not (lat and lon):
-                print(f"   🚫 缺少位置信息 (lat={lat}, lon={lon})")
-                return
 
             # --- 增强的过滤逻辑 (User Request) ---
             # 1. 获取 SN 和 Gateway
@@ -296,22 +292,155 @@ class Command(BaseCommand):
 
             # 4. 确认通过过滤，使用 SN
             device_sn = sn
-            print(f"   ✅ 过滤通过！准备写入数据库...")
 
-            DronePosition.objects.create(
-                device_sn=device_sn,
-                latitude=lat,
-                longitude=lon,
-                altitude=alt if alt else 0,
-                raw_data=data,
-                timestamp=timezone.now(),
-                mqtt_topic=topic
-            )
-            print(f"   ✅ 写入成功！{device_sn} -> ({lat}, {lon}, {alt}m)")
+            # 🔥 判断是机场还是无人机 (SN以8开头的是机场)
+            if device_sn.startswith('8'):
+                print(f"   🏭 识别为机场设备: {device_sn}")
+                self.update_dock_status(device_sn, payload, topic, gateway_raw)
+            else:
+                print(f"   🚁 识别为无人机设备: {device_sn}")
+                # 保存无人机位置
+                if lat and lon:
+                    DronePosition.objects.create(
+                        device_sn=device_sn,
+                        latitude=lat,
+                        longitude=lon,
+                        altitude=alt if alt else 0,
+                        raw_data=data,
+                        timestamp=timezone.now(),
+                        mqtt_topic=topic
+                    )
+                    print(f"   ✅ 无人机位置写入成功！{device_sn} -> ({lat}, {lon}, {alt}m)")
 
         except Exception as e:
             # 数据库错误不应中断 MQTT 循环
             import traceback
             print(f"❌ 数据库错误: {e}")
             print(f"   详细错误:")
+            traceback.print_exc()
+
+    def update_dock_status(self, dock_sn, payload, topic, gateway):
+        """
+        更新机场状态到数据库
+        """
+        try:
+            from telemetry_app.models import DockStatus
+            from django.utils import timezone
+
+            # 获取或创建机场状态记录
+            dock, created = DockStatus.objects.get_or_create(
+                dock_sn=dock_sn,
+                defaults={'dock_name': f'机场-{dock_sn[-4:]}'}
+            )
+
+            # 更新位置信息
+            if 'latitude' in payload:
+                dock.latitude = payload['latitude']
+            if 'longitude' in payload:
+                dock.longitude = payload['longitude']
+            if 'height' in payload:
+                dock.height = payload['height']
+
+            # 更新环境信息
+            if 'environment_temperature' in payload:
+                dock.environment_temperature = payload['environment_temperature']
+            if 'temperature' in payload:
+                dock.temperature = payload['temperature']
+            if 'humidity' in payload:
+                dock.humidity = payload['humidity']
+            if 'wind_speed' in payload:
+                dock.wind_speed = payload['wind_speed']
+            if 'rainfall' in payload:
+                dock.rainfall = payload['rainfall']
+
+            # 更新硬件状态
+            if 'mode_code' in payload:
+                dock.mode_code = payload['mode_code']
+            if 'cover_state' in payload:
+                dock.cover_state = payload['cover_state']
+            if 'putter_state' in payload:
+                dock.putter_state = payload['putter_state']
+            if 'supplement_light_state' in payload:
+                dock.supplement_light_state = payload['supplement_light_state']
+            if 'emergency_stop_state' in payload:
+                dock.emergency_stop_state = payload['emergency_stop_state']
+
+            # 更新电源信息
+            if 'electric_supply_voltage' in payload:
+                dock.electric_supply_voltage = payload['electric_supply_voltage']
+            if 'working_voltage' in payload:
+                dock.working_voltage = payload['working_voltage']
+            if 'working_current' in payload:
+                dock.working_current = payload['working_current']
+
+            # 更新备用电池信息
+            if 'backup_battery' in payload:
+                battery = payload['backup_battery']
+                if 'voltage' in battery:
+                    dock.backup_battery_voltage = battery['voltage']
+                if 'temperature' in battery:
+                    dock.backup_battery_temperature = battery['temperature']
+                if 'switch' in battery:
+                    dock.backup_battery_switch = battery['switch']
+
+            # 更新无人机状态
+            if 'drone_in_dock' in payload:
+                dock.drone_in_dock = payload['drone_in_dock']
+            if 'drone_charge_state' in payload:
+                charge = payload['drone_charge_state']
+                if isinstance(charge, dict):
+                    dock.drone_charge_state = charge.get('state', 0)
+                    dock.drone_battery_percent = charge.get('capacity_percent', 0)
+                else:
+                    dock.drone_charge_state = charge
+
+            # 更新子设备信息
+            if 'sub_device' in payload:
+                sub_dev = payload['sub_device']
+                if 'device_sn' in sub_dev:
+                    dock.drone_sn = sub_dev['device_sn']
+
+            # 更新网络状态
+            if 'network_state' in payload:
+                net = payload['network_state']
+                if 'type' in net:
+                    dock.network_state_type = net['type']
+                if 'quality' in net:
+                    dock.network_quality = net['quality']
+                if 'rate' in net:
+                    dock.network_rate = net['rate']
+
+            # 更新存储信息
+            if 'storage' in payload:
+                storage = payload['storage']
+                if 'total' in storage:
+                    dock.storage_total = storage['total']
+                if 'used' in storage:
+                    dock.storage_used = storage['used']
+
+            # 更新任务统计
+            if 'job_number' in payload:
+                dock.job_number = payload['job_number']
+            if 'acc_time' in payload:
+                dock.acc_time = payload['acc_time']
+            if 'activation_time' in payload:
+                dock.activation_time = payload['activation_time']
+
+            # 更新告警状态
+            if 'alarm_state' in payload:
+                dock.alarm_state = payload['alarm_state']
+
+            # 保存原始数据
+            dock.raw_osd_data = payload
+            dock.last_update_time = timezone.now()
+            dock.is_online = True
+
+            dock.save()
+
+            action = "创建" if created else "更新"
+            print(f"   ✅ 机场状态{action}成功！{dock_sn}")
+
+        except Exception as e:
+            import traceback
+            print(f"❌ 更新机场状态失败: {e}")
             traceback.print_exc()

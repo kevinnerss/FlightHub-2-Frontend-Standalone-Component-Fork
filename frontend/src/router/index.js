@@ -11,6 +11,7 @@ const CarouselDetection = () => import('../views/CarouselDetection.vue')
 const CreateFlightTask = () => import('../views/CreateFlightTask.vue')
 const InspectTaskManagement = () => import('../views/InspectTaskManagement.vue')
 const MainView = () => import("../views/MainView.vue");
+const DockMonitor = () => import('../views/DockMonitor.vue')
 //const MediaLibrary = () => import('../views/ceshi.vue')
 
 const routes = [
@@ -111,6 +112,16 @@ const routes = [
     component: CommandCenter,
     meta: {
       title: '智能主控台',
+      requiresAuth: true
+    }
+  },
+
+  {
+    path: '/dock-monitor',
+    name: 'DockMonitor',
+    component: DockMonitor,
+    meta: {
+      title: '机场监控',
       requiresAuth: true
     }
   },

@@ -1,8 +1,20 @@
 <template>
   <div class="inspect-task-list-premium">
     <!-- 头部 -->
-    <div class="list-header">
-      <h2 class="list-title">巡检任务列表</h2>
+    <div class="list-header-premium">
+      <div class="header-content">
+        <div class="header-left">
+          <div class="header-icon">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div class="header-text">
+            <h1 class="list-title">巡检任务列表</h1>
+            <p class="list-subtitle">管理和查看无人机巡检任务</p>
+          </div>
+        </div>
+      </div>
     </div>
     
     <!-- 搜索和筛选 -->
@@ -72,7 +84,12 @@
             <td>
               <span class="id-badge">{{ task.id }}</span>
             </td>
-            <td>{{ task.external_task_id || '--' }}</td>
+            <td>
+              <!-- 🔥 修复：父任务显示external_task_id，子任务显示dji_task_name -->
+              <span class="task-name" :title="task.external_task_id">
+                {{ categoryFilter ? (task.dji_task_name || task.external_task_id || '--') : (task.external_task_id || '--') }}
+              </span>
+            </td>
             <td>
               <span class="device-badge" :class="{'has-sn': task.device_sn}">
                 {{ task.device_sn || '--' }}
@@ -305,10 +322,15 @@ export default {
   methods: {
     async loadWaylines() {
       try {
-        const response = await waylineApi.getWaylines({})
-        this.waylines = response?.results || []
+        const response = await waylineApi.getWaylines({ page_size: 1000 })
+        console.log('📋 [航线列表] 响应数据:', response)
+        // 🔥 修复：后端禁用了分页，直接返回数组，而不是 {results: [...]}
+        this.waylines = Array.isArray(response) ? response : (response?.results || [])
+        console.log(`📋 [航线列表] 加载了 ${this.waylines.length} 条航线`)
       } catch (error) {
-        console.error('加载航线列表失败:', error)
+        console.error('❌ [航线列表] 加载失败:', error)
+        // 🔥 新增：显示错误提示
+        ElMessage.error('加载航线列表失败')
       }
     },
     
@@ -358,18 +380,10 @@ export default {
         }
         
         const response = await inspectTaskApi.getInspectTasks(params)
-        const allTasks = response?.results || []
-        
-        // 🔥 根据是否选了检测类型决定显示父任务还是子任务
-        if (this.categoryFilter) {
-          // 选了类型，显示子任务
-          this.tasks = allTasks
-        } else {
-          // 没选类型，显示父任务
-          this.tasks = allTasks.filter(item => !item.parent_task)
-        }
-        
-        this.totalTasks = response?.count || this.tasks.length
+
+        // 🔥 修复：后端已经根据 parent_task__isnull 过滤了，前端直接使用
+        this.tasks = response?.results || []
+        this.totalTasks = response?.count || 0
         this.filteredTasks = this.tasks
       } catch (error) {
         console.error('加载巡检任务失败:', error)
@@ -530,28 +544,110 @@ export default {
 <style scoped>
 /* 主容器 */
 .inspect-task-list-premium {
+  background: rgba(10, 15, 35, 0.75);
+  backdrop-filter: blur(20px) saturate(180%);
+  border-radius: 16px;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  overflow: hidden;
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.5),
+    0 0 40px rgba(59, 130, 246, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  padding: 28px 36px;
+  animation: cardSlideIn 0.5s ease-out;
+}
+
+@keyframes cardSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 列表头部 */
+.list-header-premium {
+  margin-bottom: 24px;
+}
+
+.header-content {
+  padding: 24px 28px;
   background: rgba(26, 31, 58, 0.6);
   backdrop-filter: blur(10px);
   border-radius: 16px;
   border: 1px solid rgba(59, 130, 246, 0.3);
-  overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-  padding: 24px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), 0 0 40px rgba(59, 130, 246, 0.1);
+  animation: headerSlideIn 0.5s ease-out;
 }
 
-/* 列表头部 */
-.list-header {
-  margin-bottom: 20px;
+@keyframes headerSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.header-icon {
+  width: 48px;
+  height: 48px;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
+  animation: iconPulse 3s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.header-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+@keyframes iconPulse {
+  0%, 100% {
+    box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
+  }
+  50% {
+    box-shadow: 0 4px 24px rgba(59, 130, 246, 0.6);
+  }
+}
+
+.header-text {
+  flex: 1;
 }
 
 .list-title {
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 700;
   background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  margin: 0 0 4px 0;
+  letter-spacing: 0.5px;
+}
+
+.list-subtitle {
+  font-size: 14px;
+  color: #94a3b8;
   margin: 0;
+  font-weight: 400;
 }
 
 /* 搜索和筛选区域 */
@@ -713,6 +809,18 @@ export default {
   font-size: 12px;
   font-weight: 700;
   font-family: 'Courier New', monospace;
+}
+
+/* 🔥 新增：任务名称样式 */
+.task-name {
+  display: inline-block;
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #e2e8f0;
+  font-weight: 500;
+  cursor: help;
 }
 
 .status-badge {
