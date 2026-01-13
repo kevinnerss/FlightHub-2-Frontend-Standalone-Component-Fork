@@ -258,9 +258,19 @@ export default createStore({
     },
 
     // 刷新视频流
-    refreshStream({ commit }) {
-      const timestamp = Date.now()
-      commit('SET_VIDEO_STREAM', `https://picsum.photos/1280/720?random=${timestamp}`)
+    async refreshStream({ commit }) {
+      try {
+        const droneStatus = await droneApi.getDroneStatus()
+        if (droneStatus && droneStatus.videoStreamUrl) {
+          commit('SET_VIDEO_STREAM', droneStatus.videoStreamUrl)
+        }
+        if (droneStatus && typeof droneStatus.isStreaming === 'boolean') {
+          commit('SET_IS_STREAMING', droneStatus.isStreaming)
+        }
+      } catch (error) {
+        commit('SET_ERROR', error.message || '刷新视频流失败')
+        console.error('刷新视频流失败:', error)
+      }
     },
 
     // 用户认证相关action

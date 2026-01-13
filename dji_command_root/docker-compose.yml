@@ -6,10 +6,9 @@ services:
     container_name: dji-command-backend
     ports:
       - "8001:8001"
-    # 不挂载数据库文件，让容器内部创建（数据会保存在容器内）
-    # 如果需要持久化数据，可以取消下面的注释并挂载数据库文件
-    # volumes:
-    #   - ./db.sqlite3:/app/db.sqlite3
+    # 挂载本地数据库文件
+    volumes:
+      - ./db.sqlite3:/app/db.sqlite3
       # 如果需要开发时热重载，可以挂载代码目录（可选）
       # - .:/app
     environment:
