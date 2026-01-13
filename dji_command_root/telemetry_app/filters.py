@@ -25,12 +25,18 @@ class AlarmFilter(django_filters.FilterSet):
         field_name='source_image__inspect_task',
         lookup_expr='exact'
     )
+    # 🔥 新增：按检测类型过滤（通过 wayline 的 detect_type）
+    detect_type = django_filters.CharFilter(
+        field_name='wayline__detect_type',
+        lookup_expr='exact'
+    )
 
     class Meta:
         model = Alarm
         fields = [
             'status', 'handler', 'category', 'wayline', 'wayline_id', 'wayline_name',
-            'start_date', 'end_date', 'category_name', 'category_code', 'source_task'
+            'start_date', 'end_date', 'category_name', 'category_code', 'source_task',
+            'detect_type'
         ]
 
 

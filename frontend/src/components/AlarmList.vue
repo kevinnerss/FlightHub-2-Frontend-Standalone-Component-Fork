@@ -1,22 +1,5 @@
 <template>
   <div class="alarm-list-premium">
-    <!-- 头部 -->
-    <div class="list-header-premium">
-      <div class="header-content">
-        <div class="header-left">
-          <div class="header-icon">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </div>
-          <div class="header-text">
-            <h1 class="list-title">告警信息列表</h1>
-            <p class="list-subtitle">查看和管理系统告警</p>
-          </div>
-        </div>
-      </div>
-    </div>
-    
     <!-- 搜索和筛选 -->
     <div class="search-filters-premium">
       <div class="search-wrapper">
@@ -36,7 +19,15 @@
         <option value="COMPLETED">已完成</option>
         <option value="IGNORED">已忽略</option>
       </select>
-      
+
+      <select v-model="detectTypeFilter" @change="loadAlarms" class="filter-select">
+        <option value="">全部检测类型</option>
+        <option value="rail">铁路</option>
+        <option value="contactline">接触网</option>
+        <option value="bridge">桥梁</option>
+        <option value="protected_area">保护区</option>
+      </select>
+
       <select v-model="waylineIdFilter" @change="loadAlarms" class="filter-select">
         <option value="">全部航线</option>
         <option v-for="wayline in waylines" :key="wayline.id" :value="wayline.wayline_id">
@@ -247,6 +238,7 @@ export default {
       filteredAlarms: [],
       searchQuery: '',
       statusFilter: '',
+      detectTypeFilter: '',
       waylineIdFilter: '',
       loading: false,
       currentPage: 1,
@@ -272,6 +264,7 @@ export default {
         }
         if (this.searchQuery) params.search = this.searchQuery
         if (this.statusFilter) params.status = this.statusFilter
+        if (this.detectTypeFilter) params.detect_type = this.detectTypeFilter
         if (this.waylineIdFilter) params.wayline_id = this.waylineIdFilter
         
         const response = await alarmApi.getAlarms(params)
@@ -396,88 +389,6 @@ export default {
     opacity: 1;
     transform: translateY(0);
   }
-}
-
-/* 列表头部 */
-.list-header-premium {
-  margin-bottom: 24px;
-}
-
-.header-content {
-  padding: 24px 28px;
-  background: rgba(26, 31, 58, 0.6);
-  backdrop-filter: blur(10px);
-  border-radius: 16px;
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), 0 0 40px rgba(59, 130, 246, 0.1);
-  animation: headerSlideIn 0.5s ease-out;
-}
-
-@keyframes headerSlideIn {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.header-icon {
-  width: 48px;
-  height: 48px;
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
-  animation: iconPulse 3s ease-in-out infinite;
-  flex-shrink: 0;
-}
-
-.header-icon svg {
-  width: 24px;
-  height: 24px;
-}
-
-@keyframes iconPulse {
-  0%, 100% {
-    box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
-  }
-  50% {
-    box-shadow: 0 4px 24px rgba(59, 130, 246, 0.6);
-  }
-}
-
-.header-text {
-  flex: 1;
-}
-
-.list-title {
-  font-size: 24px;
-  font-weight: 700;
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  margin: 0 0 4px 0;
-  letter-spacing: 0.5px;
-}
-
-.list-subtitle {
-  font-size: 14px;
-  color: #94a3b8;
-  margin: 0;
-  font-weight: 400;
 }
 
 /* 搜索筛选 */

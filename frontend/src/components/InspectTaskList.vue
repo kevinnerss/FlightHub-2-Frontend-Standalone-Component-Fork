@@ -1,22 +1,5 @@
 <template>
   <div class="inspect-task-list-premium">
-    <!-- 头部 -->
-    <div class="list-header-premium">
-      <div class="header-content">
-        <div class="header-left">
-          <div class="header-icon">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </div>
-          <div class="header-text">
-            <h1 class="list-title">巡检任务列表</h1>
-            <p class="list-subtitle">管理和查看无人机巡检任务</p>
-          </div>
-        </div>
-      </div>
-    </div>
-    
     <!-- 搜索和筛选 -->
     <div class="search-filters-premium">
       <div class="search-wrapper">
@@ -152,7 +135,7 @@
     </div>
     
     <!-- 分页器 -->
-    <div class="pagination-premium">
+    <div class="pagination-premium" v-if="totalTasks > 0">
       <div class="pagination-info">
         显示 {{ Math.min((currentPage - 1) * pageSize + 1, totalTasks) }} - {{ Math.min(currentPage * pageSize, totalTasks) }} 条，共 {{ totalTasks }} 条
       </div>
@@ -160,8 +143,8 @@
         <button @click="handlePageChange(currentPage - 1)" :disabled="currentPage === 1" class="pagination-btn">
           ‹
         </button>
-        <input 
-          type="number" 
+        <input
+          type="number"
           :value="currentPage"
           @change="handlePageChange(Number($event.target.value))"
           class="page-input"
@@ -341,7 +324,7 @@ export default {
           page: this.currentPage,
           page_size: this.pageSize
         }
-        
+
         // 🔥 检测类型筛选逻辑：如果选了类型，只显示子任务
         if (this.categoryFilter) {
           // 先获取检测类型的 ID
@@ -357,7 +340,7 @@ export default {
             return v
           }
           const targetCategory = categories.find(c => normalizeCode(c.code) === this.categoryFilter)
-          
+
           if (targetCategory) {
             params.detect_category = targetCategory.id
             params.parent_task__isnull = false // 🔥 只查询子任务
@@ -366,27 +349,44 @@ export default {
           // 没选类型，只显示父任务
           params.parent_task__isnull = true
         }
-        
+
         if (this.statusFilter) {
           params.detect_status = this.statusFilter
         }
-        
+
         if (this.waylineFilter) {
           params.wayline = this.waylineFilter
         }
-        
+
         if (this.searchQuery) {
           params.search = this.searchQuery
         }
-        
+
         const response = await inspectTaskApi.getInspectTasks(params)
 
         // 🔥 修复：后端已经根据 parent_task__isnull 过滤了，前端直接使用
         this.tasks = response?.results || []
         this.totalTasks = response?.count || 0
         this.filteredTasks = this.tasks
+
+        // 🔥 新增：如果当前页超出范围，自动调整到最后一页
+        const maxPage = Math.ceil(this.totalTasks / this.pageSize) || 1
+        if (this.currentPage > maxPage && maxPage > 0) {
+          this.currentPage = maxPage
+          // 重新加载正确的页码
+          await this.loadTasks()
+        }
       } catch (error) {
         console.error('加载巡检任务失败:', error)
+
+        // 🔥 新增：如果是404或页码无效错误，自动调整到第一页
+        if (error.response?.status === 404 || error.response?.data?.detail === 'Invalid page.') {
+          console.warn('页码无效，重置到第一页')
+          this.currentPage = 1
+          await this.loadTasks()
+          return
+        }
+
         ElMessage.error('加载巡检任务失败')
       } finally {
         this.loading = false
@@ -399,10 +399,24 @@ export default {
     },
     
     handlePageChange(page) {
-      if (page >= 1 && page <= Math.ceil(this.totalTasks / this.pageSize)) {
-        this.currentPage = page
-        this.loadTasks()
+      // 验证页码有效性
+      if (!page || page < 1 || isNaN(page)) {
+        page = 1
       }
+
+      // 计算最大页码
+      const maxPage = Math.ceil(this.totalTasks / this.pageSize) || 1
+
+      // 如果页码超出范围,调整到最后一页
+      if (page > maxPage) {
+        page = maxPage
+        this.currentPage = page
+      } else {
+        this.currentPage = page
+      }
+
+      // 加载任务
+      this.loadTasks()
     },
     
     viewTaskDetail(task) {
@@ -544,15 +558,6 @@ export default {
 <style scoped>
 /* 主容器 */
 .inspect-task-list-premium {
-  background: rgba(10, 15, 35, 0.75);
-  backdrop-filter: blur(20px) saturate(180%);
-  border-radius: 16px;
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  overflow: hidden;
-  box-shadow:
-    0 20px 60px rgba(0, 0, 0, 0.5),
-    0 0 40px rgba(59, 130, 246, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
   padding: 28px 36px;
   animation: cardSlideIn 0.5s ease-out;
 }
@@ -566,88 +571,6 @@ export default {
     opacity: 1;
     transform: translateY(0);
   }
-}
-
-/* 列表头部 */
-.list-header-premium {
-  margin-bottom: 24px;
-}
-
-.header-content {
-  padding: 24px 28px;
-  background: rgba(26, 31, 58, 0.6);
-  backdrop-filter: blur(10px);
-  border-radius: 16px;
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), 0 0 40px rgba(59, 130, 246, 0.1);
-  animation: headerSlideIn 0.5s ease-out;
-}
-
-@keyframes headerSlideIn {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.header-icon {
-  width: 48px;
-  height: 48px;
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
-  animation: iconPulse 3s ease-in-out infinite;
-  flex-shrink: 0;
-}
-
-.header-icon svg {
-  width: 24px;
-  height: 24px;
-}
-
-@keyframes iconPulse {
-  0%, 100% {
-    box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
-  }
-  50% {
-    box-shadow: 0 4px 24px rgba(59, 130, 246, 0.6);
-  }
-}
-
-.header-text {
-  flex: 1;
-}
-
-.list-title {
-  font-size: 24px;
-  font-weight: 700;
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  margin: 0 0 4px 0;
-  letter-spacing: 0.5px;
-}
-
-.list-subtitle {
-  font-size: 14px;
-  color: #94a3b8;
-  margin: 0;
-  font-weight: 400;
 }
 
 /* 搜索和筛选区域 */
@@ -1107,12 +1030,12 @@ export default {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(4px);
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 9999;
+  z-index: 99999;
   animation: fadeIn 0.3s ease;
 }
 
@@ -1186,6 +1109,16 @@ export default {
   padding: 28px;
 }
 
+.subtask-body {
+  padding: 0;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.subtask-table {
+  margin: 0;
+}
+
 .detail-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -1257,5 +1190,28 @@ export default {
 
 .secondary-btn:hover {
   background: rgba(100, 116, 139, 0.3);
+}
+
+/* 滚动条样式 */
+.modal-premium::-webkit-scrollbar,
+.subtask-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.modal-premium::-webkit-scrollbar-track,
+.subtask-body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+}
+
+.modal-premium::-webkit-scrollbar-thumb,
+.subtask-body::-webkit-scrollbar-thumb {
+  background: rgba(59, 130, 246, 0.3);
+  border-radius: 3px;
+}
+
+.modal-premium::-webkit-scrollbar-thumb:hover,
+.subtask-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(59, 130, 246, 0.5);
 }
 </style>
