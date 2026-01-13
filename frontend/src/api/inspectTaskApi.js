@@ -188,5 +188,16 @@ export default {
       console.error('启动巡检任务失败:', error)
       throw error
     }
+  },
+
+  // 强制结束任务并删除所有相关记录（InspectTask, InspectImage, Alarm）
+  async forceDeleteTask(taskId) {
+    try {
+      const response = await api.delete(`/inspect-tasks/${taskId}/force_delete/`)
+      return response
+    } catch (error) {
+      console.error('强制删除任务失败:', error)
+      throw error
+    }
   }
 }

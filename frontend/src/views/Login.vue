@@ -12,14 +12,9 @@
       <!-- Logo和标题 -->
       <div class="login-header">
         <div class="logo-container">
-          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="logo-icon">
-            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
+          <img src="/pho/横式组合_1_.png" alt="Logo" class="logo-image" />
         </div>
-        <h1 class="title">FlightHub</h1>
-        <p class="subtitle">无人机巡检数字孪生系统</p>
+        <h1 class="title">沈阳地铁低空智能巡检平台</h1>
       </div>
 
       <!-- 登录表单 -->
@@ -85,10 +80,6 @@
         </button>
       </div>
 
-      <!-- 底部提示 -->
-      <div class="login-footer">
-        <p>默认账号: admin / admin123</p>
-      </div>
     </div>
   </div>
 </template>
@@ -139,7 +130,7 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 50%, #0a0e27 100%);
+  background: linear-gradient(135deg, #050816 0%, #0d1126 50%, #050816 100%);
   padding: 20px;
   position: relative;
   overflow: hidden;
@@ -201,12 +192,12 @@ export default {
 /* 登录卡片 */
 .login-card {
   width: 100%;
-  max-width: 440px;
-  background: rgba(26, 31, 58, 0.85);
+  max-width: 520px;
+  background: rgba(10, 15, 35, 0.65);
   backdrop-filter: blur(20px) saturate(180%);
   border-radius: 24px;
   padding: 48px 40px;
-  border: 1px solid rgba(0, 212, 255, 0.2);
+  border: 1px solid rgba(0, 212, 255, 0.3);
   box-shadow: 
     0 20px 60px rgba(0, 0, 0, 0.5),
     0 0 40px rgba(0, 212, 255, 0.1),
@@ -234,16 +225,20 @@ export default {
 }
 
 .logo-container {
-  width: 80px;
-  height: 80px;
+  width: 400px;
+  height: 200px;
   margin: 0 auto 20px;
-  background: linear-gradient(135deg, #00d4ff 0%, #0099ff 100%);
-  border-radius: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 8px 24px rgba(0, 212, 255, 0.4);
   animation: logoFloat 3s ease-in-out infinite;
+}
+
+.logo-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.5));
 }
 
 @keyframes logoFloat {
@@ -253,12 +248,6 @@ export default {
   50% {
     transform: translateY(-10px);
   }
-}
-
-.logo-icon {
-  width: 48px;
-  height: 48px;
-  color: #fff;
 }
 
 .title {
@@ -457,13 +446,8 @@ export default {
   }
 
   .logo-container {
-    width: 64px;
-    height: 64px;
-  }
-
-  .logo-icon {
-    width: 36px;
-    height: 36px;
+    width: 320px;
+    height: 160px;
   }
 
   .title {

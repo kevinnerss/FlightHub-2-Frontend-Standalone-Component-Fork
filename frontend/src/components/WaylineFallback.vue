@@ -157,9 +157,11 @@ export default {
   width: 100%;
   height: 300px;
   min-height: 300px;
-  border: 1px solid #ebeef5;
-  border-radius: 4px;
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  border-radius: 12px;
   overflow: hidden;
+  background: rgba(26, 31, 58, 0.6);
+  backdrop-filter: blur(10px);
 }
 
 .dji-placeholder {
@@ -168,7 +170,7 @@ export default {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #909399;
-  background-color: #f5f7fa;
+  color: #94a3b8;
+  background: rgba(10, 14, 39, 0.8);
 }
 </style>

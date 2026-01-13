@@ -35,7 +35,7 @@ export default {
     AlarmList
   },
   metaInfo: {
-    title: '告警管理 - FlightHub'
+    title: '告警管理 - 沈阳地铁低空智能巡检平台'
   }
 }
 </script>

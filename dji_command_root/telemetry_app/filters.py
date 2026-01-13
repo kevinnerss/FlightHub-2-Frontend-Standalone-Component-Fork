@@ -20,12 +20,17 @@ class AlarmFilter(django_filters.FilterSet):
     wayline_id = django_filters.CharFilter(field_name='wayline__wayline_id', lookup_expr='icontains')
     wayline_name = django_filters.CharFilter(field_name='wayline__name', lookup_expr='icontains')
     wayline = django_filters.NumberFilter(field_name='wayline', lookup_expr='exact')
+    # 🔥 新增：按巡检任务过滤（通过 source_image 关联）
+    source_task = django_filters.NumberFilter(
+        field_name='source_image__inspect_task',
+        lookup_expr='exact'
+    )
 
     class Meta:
         model = Alarm
         fields = [
             'status', 'handler', 'category', 'wayline', 'wayline_id', 'wayline_name',
-            'start_date', 'end_date', 'category_name', 'category_code'
+            'start_date', 'end_date', 'category_name', 'category_code', 'source_task'
         ]
 
 

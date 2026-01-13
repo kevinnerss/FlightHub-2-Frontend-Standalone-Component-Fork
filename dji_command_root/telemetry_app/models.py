@@ -97,6 +97,7 @@ class AlarmCategory(models.Model):
         verbose_name = "告警类型/检测配置"
         verbose_name_plural = "告警类型/检测配置"
         unique_together = ('parent', 'name')
+        ordering = ['parent__id', 'name']  # 🔥 添加默认排序，避免分页警告
 
     def __str__(self):
         # 显示层级路径，例如: "接触网 -> 断线"
@@ -391,3 +392,82 @@ class FlightTaskInfo(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.task_uuid})"
+
+
+class DockStatus(models.Model):
+    """
+    机场状态表：存储机场实时状态信息
+    根据MQTT消息动态更新
+    """
+    # 机场标识
+    dock_sn = models.CharField(max_length=100, unique=True, verbose_name="机场序列号", db_index=True)
+    dock_name = models.CharField(max_length=200, blank=True, null=True, verbose_name="机场名称")
+
+    # 位置信息
+    latitude = models.DecimalField(max_digits=11, decimal_places=8, null=True, blank=True, verbose_name="纬度")
+    longitude = models.DecimalField(max_digits=11, decimal_places=8, null=True, blank=True, verbose_name="经度")
+    height = models.FloatField(null=True, blank=True, verbose_name="海拔高度(米)")
+
+    # 环境状态
+    environment_temperature = models.FloatField(null=True, blank=True, verbose_name="环境温度(℃)")
+    temperature = models.FloatField(null=True, blank=True, verbose_name="机场内部温度(℃)")
+    humidity = models.IntegerField(null=True, blank=True, verbose_name="湿度(%)")
+    wind_speed = models.FloatField(null=True, blank=True, verbose_name="风速(m/s)")
+    rainfall = models.FloatField(null=True, blank=True, verbose_name="降雨量")
+
+    # 机场硬件状态
+    mode_code = models.IntegerField(null=True, blank=True, verbose_name="模式代码")
+    cover_state = models.IntegerField(null=True, blank=True, verbose_name="舱盖状态(0-关闭/1-打开)")
+    putter_state = models.IntegerField(null=True, blank=True, verbose_name="推杆状态")
+    supplement_light_state = models.IntegerField(null=True, blank=True, verbose_name="补光灯状态")
+    emergency_stop_state = models.IntegerField(null=True, blank=True, verbose_name="急停状态")
+
+    # 电源信息
+    electric_supply_voltage = models.IntegerField(null=True, blank=True, verbose_name="供电电压(V)")
+    working_voltage = models.IntegerField(null=True, blank=True, verbose_name="工作电压(mV)")
+    working_current = models.IntegerField(null=True, blank=True, verbose_name="工作电流(mA)")
+
+    # 备用电池
+    backup_battery_voltage = models.IntegerField(null=True, blank=True, verbose_name="备用电池电压(mV)")
+    backup_battery_temperature = models.FloatField(null=True, blank=True, verbose_name="备用电池温度(℃)")
+    backup_battery_switch = models.IntegerField(null=True, blank=True, verbose_name="备用电池开关")
+
+    # 无人机状态
+    drone_in_dock = models.IntegerField(null=True, blank=True, verbose_name="无人机在舱内(0-否/1-是)")
+    drone_charge_state = models.IntegerField(null=True, blank=True, verbose_name="无人机充电状态")
+    drone_battery_percent = models.IntegerField(null=True, blank=True, verbose_name="无人机电量(%)")
+    drone_sn = models.CharField(max_length=100, blank=True, null=True, verbose_name="机场内无人机SN")
+
+    # 网络状态
+    network_state_type = models.IntegerField(null=True, blank=True, verbose_name="网络类型")
+    network_quality = models.IntegerField(null=True, blank=True, verbose_name="网络质量")
+    network_rate = models.IntegerField(null=True, blank=True, verbose_name="网络速率")
+
+    # 存储信息
+    storage_total = models.BigIntegerField(null=True, blank=True, verbose_name="总存储空间(KB)")
+    storage_used = models.BigIntegerField(null=True, blank=True, verbose_name="已用存储空间(KB)")
+
+    # 任务统计
+    job_number = models.IntegerField(null=True, blank=True, verbose_name="任务次数")
+    acc_time = models.BigIntegerField(null=True, blank=True, verbose_name="累计工作时长(秒)")
+    activation_time = models.BigIntegerField(null=True, blank=True, verbose_name="激活时间戳")
+
+    # 状态信息
+    alarm_state = models.IntegerField(null=True, blank=True, verbose_name="告警状态")
+    is_online = models.BooleanField(default=False, verbose_name="在线状态")
+
+    # 原始数据
+    raw_osd_data = models.JSONField(blank=True, null=True, verbose_name="原始OSD数据")
+
+    # 时间戳
+    last_update_time = models.DateTimeField(null=True, blank=True, verbose_name="最后更新时间")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="记录更新时间")
+
+    class Meta:
+        verbose_name = "机场状态"
+        verbose_name_plural = "机场状态"
+        ordering = ['-last_update_time']
+
+    def __str__(self):
+        return f"{self.dock_name or self.dock_sn} - {'在线' if self.is_online else '离线'}"

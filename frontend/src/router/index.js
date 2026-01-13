@@ -7,11 +7,11 @@ const DjiDashboard = () => import('../views/DjiDashboard.vue')
 const CommandCenter = () => import('../views/CommandCenter.vue')
 const AlarmManagement = () => import('../views/AlarmManagement.vue')
 const AlarmStats = () => import('../views/AlarmStats.vue')
-const ComponentConfig = () => import('../views/ComponentConfig.vue')
 const CarouselDetection = () => import('../views/CarouselDetection.vue')
 const CreateFlightTask = () => import('../views/CreateFlightTask.vue')
 const InspectTaskManagement = () => import('../views/InspectTaskManagement.vue')
 const MainView = () => import("../views/MainView.vue");
+const DockMonitor = () => import('../views/DockMonitor.vue')
 //const MediaLibrary = () => import('../views/ceshi.vue')
 
 const routes = [
@@ -31,17 +31,6 @@ const routes = [
     component: UserManagement,
     meta: {
       title: '\u4eba\u5458\u7ba1\u7406',
-      requiresAuth: true,
-      requiresAdmin: true
-    }
-  },
-
-  {
-    path: '/component-config',
-    name: 'ComponentConfig',
-    component: ComponentConfig,
-    meta: {
-      title: '\u7ec4\u4ef6\u53c2\u6570\u914d\u7f6e',
       requiresAuth: true,
       requiresAdmin: true
     }
@@ -92,7 +81,7 @@ const routes = [
     name: 'CarouselDetection',
     component: CarouselDetection,
     meta: {
-      title: '\u8f6e\u64ad\u68c0\u6d4b',
+      title: 'AI检测',
       requiresAuth: true
     }
   },
@@ -123,6 +112,16 @@ const routes = [
     component: CommandCenter,
     meta: {
       title: '智能主控台',
+      requiresAuth: true
+    }
+  },
+
+  {
+    path: '/dock-monitor',
+    name: 'DockMonitor',
+    component: DockMonitor,
+    meta: {
+      title: '机场监控',
       requiresAuth: true
     }
   },

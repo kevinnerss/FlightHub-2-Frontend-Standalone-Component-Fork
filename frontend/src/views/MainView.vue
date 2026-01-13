@@ -79,18 +79,34 @@
 
       <!-- 实时流媒体展示 -->
       <div class="bottom-media">
-        <div class="glass-card video-card hover-effect">
-          <div class="media-tag">
-            <div class="tag-left">
-              <span class="rec-dot"></span>
-              <span class="tag-text">REC</span>
-              <span class="cam-info">CAM 01 - INFRARED</span>
+        <div class="glass-card hero-card hover-effect">
+          <div class="hero-overlay"></div>
+          <div class="hero-content">
+            <div class="hero-header">
+              <div>
+                <p class="hero-label">安全运行天数</p>
+                <div class="hero-number">
+                  {{ safetyStats.safetyDays }}
+                  <span class="hero-unit">天</span>
+                </div>
+              </div>
+              <span class="hero-tag">近一年</span>
+            </div>
+            <div class="hero-summary">
+              <div v-for="status in safetyStatuses" :key="status.label" class="summary-chip">
+                <span class="chip-dot" :style="{ background: status.color }"></span>
+                <span class="chip-label">{{ status.label }}</span>
+                <span class="chip-value">{{ status.value }}</span>
+              </div>
+            </div>
+            <div class="hero-summary">
+              <div v-for="status in safetyStatuses" :key="status.label" class="summary-chip">
+                <span class="chip-dot" :style="{ background: status.color }"></span>
+                <span class="chip-label">{{ status.label }}</span>
+                <span class="chip-value">{{ status.value }}</span>
+              </div>
             </div>
           </div>
-          <img
-              src="https://images.unsplash.com/photo-1508614589041-895b88991e3e?auto=format&fit=crop&q=80&w=1000"
-              class="stream-img"
-          />
         </div>
 
         <!-- 航迹回放 -->
@@ -225,9 +241,25 @@ export default {
       ],
       showAlarms: [],
       showWaylines: [],
+      waylineNameMap: {},
       showTaskId: 0,
       showSubTasks: [],
+      safetyStats: {
+        safetyDays: 0,
+        todayAlarms: 0,
+        monthAlarms: 0,
+        totalAlarms: 0,
+      },
     };
+  },
+  computed: {
+    safetyStatuses() {
+      return [
+        { label: "今日异常", value: this.safetyStats.todayAlarms, color: "#38bdf8" },
+        { label: "近月异常", value: this.safetyStats.monthAlarms, color: "#a855f7" },
+        { label: "全年异常", value: this.safetyStats.totalAlarms, color: "#22c55e" },
+      ];
+    },
   },
   mounted() {
     this.loadData();
@@ -240,12 +272,133 @@ export default {
           this.getAlarms(),
           this.loadWaylines(),
           this.loadTask(),
+          this.loadSafetyStats(),
         ]);
       } catch (err) {
         console.error("加载告警统计失败", err);
       } finally {
         this.loading = false;
       }
+    },
+    async loadSafetyStats() {
+      try {
+        const latest = await this.fetchLatestCreatedAt();
+        const anchor = latest || new Date();
+        const start = new Date(anchor.getFullYear(), anchor.getMonth() - 11, 1, 0, 0, 0, 0);
+        const end = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0, 23, 59, 59, 999);
+        const alarms = await this.fetchAllAlarms({
+          page_size: 20000,
+          start_date: this.formatDateParam(start),
+          end_date: this.formatDateParam(end),
+        });
+        this.buildSafetyStatsFromAlarms(alarms, start);
+      } catch (err) {
+        console.warn("加载安全运行天数失败", err);
+        this.safetyStats = {
+          safetyDays: 0,
+          todayAlarms: 0,
+          monthAlarms: 0,
+          totalAlarms: 0,
+        };
+      }
+    },
+    async fetchAllAlarms(baseParams) {
+      const pageSize = baseParams.page_size || 20000;
+      let page = 1;
+      const collected = [];
+      let hasNext = true;
+      let totalCount = null;
+      while (hasNext) {
+        const res = await alarmApi.getAlarms({ ...baseParams, page, page_size: pageSize });
+        const list = this.normalizeList(res);
+        collected.push(...list);
+
+        if (totalCount === null && res && typeof res.count === "number") {
+          totalCount = res.count;
+        }
+
+        const hasNextFlag = Boolean(res && res.next);
+        const needByCount = totalCount !== null ? collected.length < totalCount : false;
+        const needBySize = list.length === pageSize;
+
+        hasNext = hasNextFlag || needByCount || needBySize;
+        if (!hasNext) break;
+        page += 1;
+      }
+      return collected;
+    },
+    async fetchLatestCreatedAt() {
+      const res = await alarmApi.getAlarms({ page_size: 1, ordering: "-created_at" });
+      const list = this.normalizeList(res);
+      if (list.length && list[0].created_at) {
+        return this.parsePlainDate(list[0].created_at);
+      }
+      return null;
+    },
+    buildSafetyStatsFromAlarms(alarms, windowStart = null) {
+      const todayKey = this.formatDateParam(new Date());
+      const todayAlarms = alarms.filter((item) => this.formatDateParam(this.parsePlainDate(item.created_at)) === todayKey).length;
+      const monthAlarms = alarms.filter((item) => this.isInCurrentMonth(item.created_at)).length;
+      const totalAlarms = alarms.length;
+
+      const latest = alarms.reduce((latestTs, alarm) => {
+        const ts = this.parsePlainDate(alarm.created_at);
+        if (Number.isNaN(ts.getTime())) return latestTs;
+        if (!latestTs) return ts;
+        return ts > latestTs ? ts : latestTs;
+      }, null);
+
+      const dayMs = 1000 * 60 * 60 * 24;
+      let safetyDays = 0;
+      if (latest) {
+        safetyDays = Math.max(Math.floor((Date.now() - latest.getTime()) / dayMs), 0);
+      } else if (windowStart instanceof Date && !Number.isNaN(windowStart.getTime())) {
+        safetyDays = Math.max(Math.floor((Date.now() - windowStart.getTime()) / dayMs), 0);
+      }
+
+      this.safetyStats = {
+        safetyDays,
+        todayAlarms,
+        monthAlarms,
+        totalAlarms,
+      };
+    },
+    isInCurrentMonth(dateLike) {
+      const dt = this.parsePlainDate(dateLike);
+      const now = new Date();
+      return dt.getFullYear() === now.getFullYear() && dt.getMonth() === now.getMonth();
+    },
+    formatDateParam(date) {
+      const dt = this.parsePlainDate(date);
+      const pad = (num) => String(num).padStart(2, "0");
+      return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+    },
+    parsePlainDate(dateLike) {
+      if (typeof dateLike === "string") {
+        const parts = this.parseDateParts(dateLike);
+        if (parts) return this.buildDateFromParts(parts);
+      }
+      return new Date(dateLike);
+    },
+    parseDateParts(dateLike) {
+      if (typeof dateLike !== "string") return null;
+      const raw = dateLike.trim();
+      const cleaned = raw.replace(/([+-]\d{2}:?\d{2}|Z)$/i, "");
+      const match = cleaned.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?/);
+      if (!match) return null;
+      const [, y, m, d, h, mi, s, ms = "0"] = match;
+      return {
+        year: Number(y),
+        month: Number(m),
+        day: Number(d),
+        hour: Number(h),
+        minute: Number(mi),
+        second: Number(s || 0),
+        milli: Number(String(ms).padEnd(3, "0").slice(0, 3)),
+      };
+    },
+    buildDateFromParts(parts) {
+      return new Date(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second, parts.milli || 0);
     },
     // 获取要展示的告警信息
     async getAlarms() {
@@ -258,7 +411,7 @@ export default {
           this.showAlarms = list;
         }
       } catch (err) {
-        console.warn("加载航线列表失败，使用空列表", err);
+        console.warn("加载告警列表失败，使用空列表", err);
       }
     },
     // 获取航线信息
@@ -266,6 +419,12 @@ export default {
       try {
         const response = await waylineApi.getWaylines({});
         const list = response?.results || [];
+        this.waylineNameMap = list.reduce((acc, item) => {
+          if (item && item.wayline_id !== undefined && item.wayline_id !== null) {
+            acc[item.wayline_id] = item.name || `航线${item.wayline_id}`;
+          }
+          return acc;
+        }, {});
         if (list.length > this.showNum) {
           this.showWaylines = list.slice(0, this.showNum);
         } else {
@@ -285,6 +444,11 @@ export default {
         const allTasks = response?.results || [];
         // 获取第一个任务->无 parent_task 的代表任务
         const task = allTasks.find((item) => !item.parent_task);
+        if (!task) {
+          this.showTaskId = 0;
+          this.showSubTasks = [];
+          return;
+        }
         this.showTaskId = task.id;
         await this.loadSubTask(task.id);
       } catch (error) {
@@ -338,7 +502,7 @@ export default {
       return (
           alarm?.wayline?.name ||
           alarm?.wayline_details?.name ||
-          this.waylineNameMap[id] ||
+          (this.waylineNameMap ? this.waylineNameMap[id] : undefined) ||
           (id ? `航线${id}` : "未知航线")
       );
     },
@@ -633,6 +797,99 @@ export default {
   grid-template-columns: 1.8fr 1.2fr;
   gap: 20px;
   height: 220px;
+}
+
+.hero-card {
+  position: relative;
+  background: linear-gradient(135deg, rgba(12, 74, 110, 0.85), rgba(30, 64, 175, 0.85));
+  min-height: 220px;
+  height: 100%;
+}
+
+.hero-overlay {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 80% 20%, rgba(56, 189, 248, 0.35), transparent 45%),
+    radial-gradient(circle at 20% 80%, rgba(94, 234, 212, 0.25), transparent 40%);
+  filter: blur(10px);
+  opacity: 0.8;
+}
+
+.hero-content {
+  position: relative;
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  z-index: 1;
+}
+
+.hero-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.hero-label {
+  color: #cbd5e1;
+  font-size: 14px;
+  letter-spacing: 1px;
+}
+
+.hero-number {
+  font-size: 48px;
+  font-weight: 800;
+  color: #e0f2fe;
+  text-shadow: 0 0 16px rgba(14, 165, 233, 0.7);
+}
+
+.hero-unit {
+  font-size: 16px;
+  color: #bae6fd;
+  margin-left: 6px;
+}
+
+.hero-tag {
+  padding: 8px 12px;
+  background: rgba(59, 130, 246, 0.2);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: 999px;
+  color: #e0f2fe;
+  font-size: 12px;
+}
+
+.hero-summary {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.summary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  color: #cbd5e1;
+}
+
+.chip-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.chip-label {
+  font-size: 13px;
+}
+
+.chip-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #e2e8f0;
 }
 
 /* 实时载荷画面卡片 */

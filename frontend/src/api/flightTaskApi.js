@@ -53,6 +53,20 @@ export default {
     }
   },
 
+  // Get recently used devices (from FlightTaskInfo)
+  async getRecentDevices() {
+    try {
+      const response = await api.get('/flight-task-proxy/recent-devices/')
+      if (response.code === 0 && response.data) {
+        return response.data
+      }
+      return []
+    } catch (error) {
+      console.error('Failed to get recent devices:', error)
+      throw error
+    }
+  },
+
   // Create flight task (via proxy)
   async createFlightTask(taskData) {
     try {
@@ -63,5 +77,39 @@ export default {
       console.error('Failed to create flight task:', error)
       throw error
     }
+  },
+
+  // 设备控制命令
+  async sendDeviceCommand(deviceSn, command) {
+    try {
+      // Calls POST /api/v1/flight-task-proxy/device/{device_sn}/command/
+      const response = await api.post(`/flight-task-proxy/device/${deviceSn}/command/`, {
+        device_command: command
+      })
+      return response
+    } catch (error) {
+      console.error('Failed to send device command:', error)
+      throw error
+    }
+  },
+
+  // 返航
+  async returnHome(deviceSn) {
+    return this.sendDeviceCommand(deviceSn, 'return_home')
+  },
+
+  // 取消返航
+  async cancelReturn(deviceSn) {
+    return this.sendDeviceCommand(deviceSn, 'cancel_return_home')
+  },
+
+  // 暂停任务
+  async pauseTask(deviceSn) {
+    return this.sendDeviceCommand(deviceSn, 'flighttask_pause')
+  },
+
+  // 恢复任务
+  async resumeTask(deviceSn) {
+    return this.sendDeviceCommand(deviceSn, 'flighttask_recovery')
   }
 }

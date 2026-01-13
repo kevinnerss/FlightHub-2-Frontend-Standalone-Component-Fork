@@ -1,9 +1,21 @@
 <template>
   <div class="wayline-list-premium">
     <!-- 航线列表头部 -->
-    <div class="list-header">
-      <h3 class="list-title">航线列表</h3>
-      <span v-if="waylineTree.length > 0" class="wayline-count">{{ totalWaylineCount }}</span>
+    <div class="list-header-premium">
+      <div class="header-content">
+        <div class="header-left">
+          <div class="header-icon">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M9 20l-5.447-2.724A1 1 0 0 1 3 16.382V5.618a1 1 0 0 1 1.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0 0 21 18.382V7.618a1 1 0 0 0-.553-.894L15 4m0 13V4m0 0L9 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div class="header-text">
+            <h1 class="list-title">航线列表</h1>
+            <p class="list-subtitle">选择飞行航线</p>
+          </div>
+        </div>
+        <span v-if="waylineTree.length > 0" class="wayline-count">{{ totalWaylineCount }}</span>
+      </div>
     </div>
     
     <!-- 航线项列表 -->
@@ -174,43 +186,128 @@ export default {
 
 <style scoped>
 .wayline-list-premium {
-  background: rgba(26, 31, 58, 0.6);
-  backdrop-filter: blur(10px);
-  border-radius: 12px;
-  border: 1px solid rgba(0, 212, 255, 0.2);
+  background: rgba(10, 15, 35, 0.75);
+  backdrop-filter: blur(20px) saturate(180%);
+  border-radius: 16px;
+  border: 1px solid rgba(59, 130, 246, 0.3);
   overflow: hidden;
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.5),
+    0 0 40px rgba(59, 130, 246, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  animation: cardSlideIn 0.5s ease-out;
+}
+
+@keyframes cardSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* 列表头部 */
-.list-header {
+.list-header-premium {
+  margin-bottom: 16px;
+}
+
+.header-content {
+  padding: 20px 24px;
+  background: rgba(26, 31, 58, 0.6);
+  backdrop-filter: blur(10px);
+  border-radius: 16px;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), 0 0 40px rgba(59, 130, 246, 0.1);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 20px;
-  background: linear-gradient(135deg, rgba(0, 212, 255, 0.15) 0%, rgba(0, 153, 255, 0.15) 100%);
-  border-bottom: 1px solid rgba(0, 212, 255, 0.2);
+  animation: headerSlideIn 0.5s ease-out;
+}
+
+@keyframes headerSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 1;
+}
+
+.header-icon {
+  width: 48px;
+  height: 48px;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
+  animation: iconPulse 3s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.header-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+@keyframes iconPulse {
+  0%, 100% {
+    box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
+  }
+  50% {
+    box-shadow: 0 4px 24px rgba(59, 130, 246, 0.6);
+  }
+}
+
+.header-text {
+  flex: 1;
 }
 
 .list-title {
-  font-size: 16px;
+  font-size: 24px;
   font-weight: 700;
-  color: #00d4ff;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin: 0 0 4px 0;
+  letter-spacing: 0.5px;
+}
+
+.list-subtitle {
+  font-size: 14px;
+  color: #94a3b8;
   margin: 0;
+  font-weight: 400;
 }
 
 .wayline-count {
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 24px;
-  height: 24px;
-  padding: 0 8px;
-  background: linear-gradient(135deg, #00d4ff 0%, #0099ff 100%);
-  border-radius: 12px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 10px;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  border-radius: 14px;
   color: #fff;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
-  box-shadow: 0 2px 8px rgba(0, 212, 255, 0.4);
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
 }
 
 /* 航线项容器 */

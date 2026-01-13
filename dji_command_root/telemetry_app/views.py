@@ -43,6 +43,7 @@ from django.core.exceptions import SuspiciousFileOperation
 from django.http import FileResponse, Http404
 from django.utils._os import safe_join
 from django.db import transaction
+from django.db.models import Count
 
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
@@ -57,7 +58,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from .models import (
     Alarm, AlarmCategory, Wayline, WaylineImage,
     ComponentConfig, MediaFolderConfig, InspectTask, InspectImage, UserProfile,
-    DronePosition, FlightTaskInfo
+    DronePosition, FlightTaskInfo, DockStatus
 )
 
 from .serializers import (
@@ -65,7 +66,7 @@ from .serializers import (
     WaylineImageSerializer, UserSerializer, UserCreateSerializer,
     LoginSerializer, TokenSerializer, ComponentConfigSerializer,
     MediaFolderConfigSerializer, InspectTaskSerializer, InspectImageSerializer,
-    DronePositionSerializer
+    DronePositionSerializer, DockStatusSerializer
 )
 
 from .filters import AlarmFilter, WaylineImageFilter
@@ -1063,22 +1064,24 @@ def minio_poller_worker2():
                         
                         # 优先使用本地记录的任务名
                         base_name = local_name if local_name else f"未分类任务-{job_id[-6:]}"
-                        parent_name = f"{date_str} {base_name}"
-                        
-                        # 创建/获取父任务
+
+                        # 🔥 修改：使用与其他检测类型统一的虚拟父任务命名规则
+                        # 格式: "20250110巡检任务" (与保护区检测一致)
+                        today_str = django_timezone.now().strftime('%Y%m%d')
+                        parent_task_id = f"{today_str}巡检任务"
+
+                        # 创建/获取统一的父任务
                         parent_task, created = InspectTask.objects.get_or_create(
-                            external_task_id=job_id,
+                            external_task_id=parent_task_id,  # 🔥 使用统一的虚拟父任务ID
                             defaults={
-                                "detect_status": "pending", 
+                                "detect_status": "pending",
                                 "bucket": bucket_name,
-                                "dji_task_name": parent_name,
-                                "dji_status": "unknown",
                                 "prefix_list": []
                             }
                         )
-                        
+
                         # 创建子任务 (未分类)
-                        child_name = f"{date_str} {base_name} (未知航线)"
+                        child_name = f"{base_name} (未知航线)"
                         target_task = InspectTask.objects.create(
                             parent_task=parent_task,
                             external_task_id=folder_uuid,
@@ -1106,40 +1109,33 @@ def minio_poller_worker2():
                         # 例如: .../media/edd3e043.../ -> job_id = edd3e043...
                         job_id = folder_uuid
 
-                        # 尝试调用司空接口获取真实任务名称（如果可用）
+                        # 尝试调用司空接口获取真实任务信息（用于后续状态跟踪）
                         dji_task_info = fetch_dji_task_info(job_id)
-                        dji_task_name_val = dji_task_info.get("name") if dji_task_info else None
                         dji_status_val = dji_task_info.get("status", "unknown") if dji_task_info else "unknown"
-                        
-                        # 构造父任务名称：优先用司空名字，没有就用 本地记录名字，最后用 日期 + 任务ID前8位
-                        date_str = django_timezone.now().strftime('%Y-%m-%d')
-                        if dji_task_name_val:
-                            parent_name = dji_task_name_val
-                        elif local_name:
-                            parent_name = f"{date_str} {local_name}"
-                        else:
-                            parent_name = f"{date_str} 巡检作业-{job_id[-6:]}"
+
+                        # 🔥 修改：使用与其他检测类型统一的虚拟父任务命名规则
+                        # 格式: "20250110巡检任务" (与保护区检测一致)
+                        today_str = django_timezone.now().strftime('%Y%m%d')
+                        parent_task_id = f"{today_str}巡检任务"
 
                         parent_task, created = InspectTask.objects.get_or_create(
-                            external_task_id=job_id,
+                            external_task_id=parent_task_id,  # 🔥 使用统一的虚拟父任务ID
                             defaults={
-                                "detect_status": "pending", 
+                                "detect_status": "pending",
                                 "bucket": bucket_name,
-                                "dji_task_name": parent_name,  # 填入构造的名称
-                                "dji_status": dji_status_val,  # 填入接口获取的状态
-                                "prefix_list": []              # 默认空列表，满足 NOT NULL 约束
+                                "prefix_list": []  # 父任务没有具体路径
                             }
                         )
-                        
-                        # 如果已存在，更新状态和名称
-                        if not created and dji_task_info:
-                             if parent_task.dji_status != dji_status_val or parent_task.dji_task_name != parent_name:
-                                 parent_task.dji_status = dji_status_val
-                                 parent_task.dji_task_name = parent_name
-                                 parent_task.save(update_fields=['dji_status', 'dji_task_name'])
 
+                        # 🔥 新增：如果司空API返回了任务信息，更新父任务状态
+                        if dji_task_info and not created:
+                            if parent_task.dji_status != dji_status_val:
+                                parent_task.dji_status = dji_status_val
+                                parent_task.save(update_fields=['dji_status'])
+
+                        # 🔥 修复：构造子任务名称时使用 today_str（已定义）而不是未定义的 date_str
                         # 构造子任务名称：日期 + 航线名 + 检测类型
-                        child_name = f"{date_str} {fingerprint.wayline.name} {cat_name}"
+                        child_name = f"{today_str} {fingerprint.wayline.name} {cat_name}"
 
                         # 创建子任务
                         target_task = InspectTask.objects.create(
@@ -1365,8 +1361,51 @@ class InspectTaskViewSet(viewsets.ModelViewSet):
     }
 
     def list(self, request, *args, **kwargs):
-        # 调用父类的 list 方法获取 queryset
-        return super().list(request, *args, **kwargs)
+        """
+        任务列表接口
+        - 默认返回所有父任务（虚拟聚合任务）
+        - 支持 ?parent_task=null 只返回父任务
+        - 支持 ?parent_task__isnull=false 只返回子任务
+        - 支持 ?parent_task__isnull=true 只返回父任务
+        """
+        # 获取基础查询集
+        queryset = self.get_queryset()
+
+        # 检查是否有 parent_task__isnull 参数
+        parent_task_isnull = request.query_params.get('parent_task__isnull', None)
+
+        if parent_task_isnull == 'true' or parent_task_isnull == 'True':
+            # 只返回父任务（没有 parent_task 的任务）
+            queryset = queryset.filter(parent_task__isnull=True).annotate(
+                sub_task_count=Count('sub_tasks')
+            ).filter(sub_task_count__gt=0)
+        elif parent_task_isnull == 'false' or parent_task_isnull == 'False':
+            # 只返回子任务
+            queryset = queryset.filter(parent_task__isnull=False)
+        else:
+            # 检查旧的 parent_task 参数（向后兼容）
+            show_parent_only = request.query_params.get('parent_task', None)
+
+            if show_parent_only == 'null' or show_parent_only == '':
+                # 只返回父任务（没有 parent_task 的任务）
+                queryset = queryset.filter(parent_task__isnull=True).annotate(
+                    sub_task_count=Count('sub_tasks')
+                ).filter(sub_task_count__gt=0)
+            elif show_parent_only == 'false' or show_parent_only == '0':
+                # 只返回子任务
+                queryset = queryset.filter(parent_task__isnull=False)
+
+        # 🔥 关键修复: 应用其他过滤器(搜索、排序等)
+        queryset = self.filter_queryset(queryset)
+
+        # 分页
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 
     @action(detail=True, methods=["post"])
     def sync_images(self, request, pk=None):
@@ -1417,6 +1456,58 @@ class InspectTaskViewSet(viewsets.ModelViewSet):
             print(f"🚀 [Start] 父任务 {task.parent_task.external_task_id} 状态同步为 scanning")
 
         return Response(InspectTaskSerializer(task).data)
+
+    @action(detail=True, methods=["delete", "post"])
+    def force_delete(self, request, pk=None):
+        """
+        强制删除任务及其所有关联数据
+        删除范围:
+        1. InspectTask (任务本身)
+        2. InspectImage (任务的所有图片)
+        3. Alarm (任务产生的所有告警)
+        4. 如果是子任务,需要考虑父任务状态
+        """
+        task = self.get_object()
+
+        # 统计即将删除的数据
+        image_count = InspectImage.objects.filter(inspect_task=task).count()
+        alarm_count = Alarm.objects.filter(wayline=task.wayline).count()
+
+        print(f"🗑️ [Force Delete] 准备删除任务: {task.external_task_id}")
+        print(f"   - 图片: {image_count} 张")
+        print(f"   - 告警: {alarm_count} 条")
+
+        # 1. 删除所有关联的 InspectImage
+        InspectImage.objects.filter(inspect_task=task).delete()
+        print(f"✅ 已删除 {image_count} 张图片记录")
+
+        # 2. 删除所有关联的 Alarm (通过 wayline 和 source_image 关联)
+        Alarm.objects.filter(source_image__inspect_task=task).delete()
+        print(f"✅ 已删除相关告警记录")
+
+        # 3. 记录父任务信息(如果是子任务)
+        parent_task = task.parent_task
+        external_id = task.external_task_id
+
+        # 4. 删除任务本身
+        task.delete()
+        print(f"✅ 已删除任务: {external_id}")
+
+        # 5. 如果是子任务,检查父任务是否还有其他子任务
+        if parent_task:
+            remaining_subs = parent_task.sub_tasks.count()
+            if remaining_subs == 0:
+                # 父任务没有子任务了,也删除父任务
+                parent_task.delete()
+                print(f"✅ 已删除空父任务: {parent_task.external_task_id}")
+            else:
+                print(f"ℹ️ 父任务还有 {remaining_subs} 个子任务,保留父任务")
+
+        return Response({
+            "detail": f"任务 {external_id} 及其所有关联数据已强制删除",
+            "deleted_images": image_count,
+            "deleted_alarms": alarm_count
+        }, status=200)
 
 
 class AlarmViewSet(viewsets.ModelViewSet):
@@ -1975,12 +2066,22 @@ class LiveMonitorViewSet(viewsets.ViewSet):
         """
         # 配置区
         ZLM_API_HOST = "http://zlm:80"
-        ZLM_SECRET = "035c73f7-bb6b-4889-a715-d9eb2d1925cc"
+        ZLM_SECRET = "123456"  # 🔥 修复：与docker-compose中ZLM配置一致
         bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "dji")
 
         print(f"🚀 [监听启动] Stream: {stream_id} | 等待首帧截图...")
+        print(f"📡 [ZLM配置] {ZLM_API_HOST} | secret: {ZLM_SECRET[:8]}...")
+        print(f"📦 [MinIO配置] bucket: {bucket_name}")
 
-        s3 = get_minio_client()
+        # 🔥 新增：启动时测试MinIO连接
+        try:
+            s3 = get_minio_client()
+            s3.head_bucket(Bucket=bucket_name)
+            print(f"✅ [MinIO连接] 成功")
+        except Exception as e:
+            print(f"❌ [MinIO连接] 失败: {e}")
+            return
+
         frame_count = 0
         current_task = None  # ⭐ 延迟创建任务
 
@@ -1998,81 +2099,97 @@ class LiveMonitorViewSet(viewsets.ViewSet):
                     "expire_sec": 1
                 }
 
-                resp = requests.get(snap_api, params=params, timeout=5)
-                res_json = resp.json()
+                resp = requests.get(snap_api, params=params, timeout=10)
 
-                if res_json.get('code') == 0:
+                # 🔥 修复：检查HTTP状态码，避免失败时直接抛异常
+                if resp.status_code != 200:
+                    if not first_frame_captured:
+                        print(f"⏳ [等待推流] HTTP {resp.status_code} - ZLM可能未准备好...")
+                    stop_event.wait(interval)
+                    continue
+
+                # 🔥 修复：ZLM的getSnap API直接返回JPEG二进制数据，不是JSON
+                # 检查响应是否为图片（通过Content-Type或JPEG魔数）
+                content_type = resp.headers.get('Content-Type', '')
+                if 'image' in content_type or resp.content[:4] == b'\xff\xd8\xff\xe0':  # JPEG魔数
+                    # ✅ 成功获取到截图数据（直接从resp.content获取）
+
                     # ⭐ 第一次成功截图时，才创建任务
                     if not first_frame_captured:
                         print(f"✅ [首帧成功] 开始创建任务...")
 
-                        # 创建任务结构
+                        # 🔥 修改：使用与其他检测类型统一的父任务命名规则
+                        # 格式: "20250110巡检任务" (与其他检测类型一致)
                         today_str = datetime.now().strftime('%Y%m%d')
-                        parent_task_name = f"{today_str}保护区直播汇总"
+                        parent_task_id = f"{today_str}巡检任务"
 
                         parent_task, _ = InspectTask.objects.get_or_create(
-                            external_task_id=parent_task_name,
+                            external_task_id=parent_task_id,
                             defaults={
+                                "detect_status": "pending",  # 🔥 改为pending，与其他任务一致
                                 "bucket": bucket_name,
-                                "detect_status": "done",
-                                "prefix_list": []
+                                "prefix_list": []  # 父任务没有具体路径
                             }
                         )
 
+                        # 创建/获取保护区分类
                         category, _ = AlarmCategory.objects.get_or_create(
                             code="protected_area",
                             defaults={"name": "保护区", "match_keyword": "保护区"}
                         )
 
+                        # 🔥 修改：子任务命名与其他检测类型保持一致
+                        # 格式: "20250110保护区检测直播_drone01_HHMMSS"
                         now_time = datetime.now().strftime('%H%M%S')
-                        child_task_name = f"直播_{stream_id}_{now_time}"
-                        virtual_prefix = f"fh_sync/live/{parent_task_name}/{child_task_name}/"
+                        sub_task_id = f"{today_str}保护区检测直播_{stream_id}_{now_time}"
+                        virtual_prefix = f"fh_sync/live/{today_str}巡检任务/{sub_task_id}/"
+
+                        # 🔥 新增：设置dji_task_name为用户友好的任务名称
+                        dji_task_name = f"保护区检测-{stream_id}"
 
                         current_task = InspectTask.objects.create(
                             parent_task=parent_task,
-                            external_task_id=child_task_name,
+                            external_task_id=sub_task_id,
+                            dji_task_name=dji_task_name,  # 🔥 新增：用户友好的任务名称
                             bucket=bucket_name,
                             prefix_list=[virtual_prefix],
                             detect_category=category,
-                            detect_status="processing"
+                            detect_status="processing"  # 直播任务立即开始检测
                         )
 
                         # 更新全局线程记录（补充任务信息）
                         if stream_id in live_monitor_threads:
                             live_monitor_threads[stream_id]["task"] = current_task
 
-                        print(f"📂 [任务创建] {parent_task_name} -> {child_task_name}")
+                        print(f"📂 [任务创建] [{parent_task_id}] -> [{sub_task_id}]")
                         first_frame_captured = True
 
-                    # 下载截图
-                    img_download_url = ZLM_API_HOST + res_json['data']
-                    img_resp = requests.get(img_download_url, timeout=5)
+                    # 🔥 修复：直接使用resp.content，不需要再次下载
+                    file_bytes = io.BytesIO(resp.content)
+                    file_size = len(resp.content)
+                    fname = f"frame_{datetime.now().strftime('%H%M%S_%f')}.jpg"
+                    object_key = f"{current_task.prefix_list[0]}{fname}"
 
-                    if img_resp.status_code == 200:
-                        file_bytes = io.BytesIO(img_resp.content)
-                        file_size = file_bytes.getbuffer().nbytes
-                        fname = f"frame_{datetime.now().strftime('%H%M%S_%f')}.jpg"
-                        object_key = f"{current_task.prefix_list[0]}{fname}"
+                    # 上传到MinIO
+                    s3.put_object(
+                        Bucket=bucket_name,
+                        Key=object_key,
+                        Body=file_bytes,
+                        ContentLength=file_size,
+                        ContentType='image/jpeg'
+                    )
 
-                        s3.put_object(
-                            Bucket=bucket_name,
-                            Key=object_key,
-                            Body=file_bytes,
-                            Length=file_size,
-                            ContentType='image/jpeg'
-                        )
+                    InspectImage.objects.create(
+                        inspect_task=current_task,
+                        object_key=object_key,
+                        detect_status='pending',
+                        wayline=current_task.wayline
+                    )
+                    frame_count += 1
+                    print(f"📸 [截图] {fname} (总计: {frame_count})")
 
-                        InspectImage.objects.create(
-                            inspect_task=current_task,
-                            object_key=object_key,
-                            detect_status='pending',
-                            wayline=current_task.wayline
-                        )
-                        frame_count += 1
-                        print(f"📸 [截图] {fname} (总计: {frame_count})")
-
-                        # 异步触发检测
-                        threading.Thread(target=auto_trigger_detect, args=(current_task,)).start()
+                    # 异步触发检测
+                    threading.Thread(target=auto_trigger_detect, args=(current_task,)).start()
                 else:
                     # 流还没推上来，等待
                     if not first_frame_captured:
@@ -2155,7 +2272,7 @@ class WebhookTestViewSet(viewsets.ViewSet):
                     has_url = bool(u and str(u).startswith(("http://", "https://")))
 
             # --- 智能日志过滤与增强 ---
-            # 1. 定义仅仅是“噪音”的基础设施事件
+            # 1. 定义仅仅是"噪音"的基础设施事件
             NOISY_EVENTS = [
                 "client.check_authz_complete",
                 "message.delivered",
@@ -2163,7 +2280,8 @@ class WebhookTestViewSet(viewsets.ViewSet):
                 "client.connected",
                 "client.disconnected",
                 "session.subscribed",
-                "session.unsubscribed"
+                "session.unsubscribed",
+                "message.publish"  # 🔥 新增：过滤MQTT消息发布事件（太频繁）
             ]
 
             # 2. 只有非噪音事件，或者虽然是噪音但包含了特殊信息（如URL）时才打印
@@ -2175,7 +2293,7 @@ class WebhookTestViewSet(viewsets.ViewSet):
                     log_parts.append(f"topic={topic}")
                 if has_url:
                     log_parts.append("✅ [包含URL]")
-                
+
                 print(" ".join(log_parts))
             else:
                 # 极其偶尔打印一个点，表示服务还活着，但防止刷屏
@@ -2968,17 +3086,55 @@ class FlightTaskProxyViewSet(viewsets.ViewSet):
             # 这里的路径取决于司空的真实 API，通常是 /openapi/v0.1/device
             # 如果需要分页，司空 API 可能需要 page/page_size 参数
             url = f"{base_url}/openapi/v0.1/device"
-            
+
             # 透传前端传来的 query params (比如 page_size)
             params = request.query_params
-            
+
             print(f"📡 [Proxy] Forwarding GET to {url}")
             resp = requests.get(url, headers=headers, params=params, timeout=10)
-            
+
             # 直接返回上游的 JSON
             return Response(resp.json(), status=resp.status_code)
         except Exception as e:
             print(f"❌ [Proxy Error] Fetch devices failed: {e}")
+            return Response({"code": 500, "msg": str(e)}, status=500)
+
+    @action(detail=False, methods=['get'], url_path='recent-devices')
+    def recent_devices(self, request):
+        """
+        获取最近使用的设备SN列表
+        用于创建任务页面的快速选择
+        """
+        try:
+            # 从 FlightTaskInfo 表获取最近使用的设备
+            # 按创建时间降序，去重，最多返回10个
+            from django.db.models import Max
+
+            recent_tasks = FlightTaskInfo.objects.filter(
+                sn__isnull=False
+            ).exclude(
+                sn=''
+            ).values('sn').annotate(
+                last_used=Max('created_at')
+            ).order_by('-last_used')[:10]
+
+            device_list = []
+            for task in recent_tasks:
+                sn = task['sn']
+                # 查找该SN最近的任务名称
+                task_info = FlightTaskInfo.objects.filter(sn=sn).order_by('-created_at').first()
+                device_list.append({
+                    'sn': sn,
+                    'name': task_info.name if task_info else sn,
+                    'last_used': task['last_used'].isoformat()
+                })
+
+            return Response({
+                "code": 0,
+                "data": device_list
+            })
+        except Exception as e:
+            print(f"❌ [Error] Get recent devices failed: {e}")
             return Response({"code": 500, "msg": str(e)}, status=500)
 
     @action(detail=False, methods=['post'], url_path='create')
@@ -2987,37 +3143,68 @@ class FlightTaskProxyViewSet(viewsets.ViewSet):
         try:
             headers, base_url = WaylineFingerprintManager.get_api_headers_and_host()
             url = f"{base_url}/openapi/v0.1/flight-task"
-            
+
             print(f"📡 [Proxy] Forwarding POST to {url}")
             # request.data 已经是解析后的 JSON (dict)
             resp = requests.post(url, headers=headers, json=request.data, timeout=10)
-            
+
             res_json = resp.json()
-            
+
             # 如果创建成功，保存到数据库
             if resp.status_code == 200 and res_json.get('code') == 0:
                 try:
                     data = res_json.get('data', {})
                     task_uuid = data.get('task_uuid')
-                    
+
                     if task_uuid:
                         # 提取参数
                         req_data = request.data
+                        # 兼容前端发送的 wayline_uuid 和 wayline_id 两种字段名
+                        wayline_id = req_data.get('wayline_uuid') or req_data.get('wayline_id')
                         FlightTaskInfo.objects.create(
                             task_uuid=task_uuid,
                             name=req_data.get('name', '未命名任务'),
                             sn=req_data.get('sn'),
-                            wayline_id=req_data.get('wayline_id'),
+                            wayline_id=wayline_id,
                             params=req_data,
                             status='created'
                         )
-                        print(f"✅ [DB] Flight task recorded: {task_uuid}")
+                        print(f"✅ [DB] Flight task recorded: {task_uuid}, wayline_id: {wayline_id}")
                 except Exception as db_e:
                     print(f"⚠️ [DB Error] Failed to record flight task: {db_e}")
-            
+
             return Response(res_json, status=resp.status_code)
         except Exception as e:
             print(f"❌ [Proxy Error] Create task failed: {e}")
+            return Response({"code": 500, "msg": str(e)}, status=500)
+
+    @action(detail=True, methods=['post'], url_path='command')
+    def device_command(self, request, device_sn=None):
+        """
+        设备控制命令 (POST /openapi/v0.1/device/{device_sn}/command)
+        支持: return_home, cancel_return_home, flighttask_pause, flighttask_recovery
+        """
+        try:
+            headers, base_url = WaylineFingerprintManager.get_api_headers_and_host()
+            url = f"{base_url}/openapi/v0.1/device/{device_sn}/command"
+
+            # 获取命令参数
+            device_command = request.data.get('device_command')
+
+            if not device_command:
+                return Response({"code": 400, "msg": "缺少 device_command 参数"}, status=400)
+
+            print(f"📡 [Proxy] Device Command: {device_command} -> {device_sn}")
+
+            # 转发请求到司空API
+            resp = requests.post(url, headers=headers, json=request.data, timeout=10)
+
+            res_json = resp.json()
+            print(f"✅ [Proxy] Command response: {res_json}")
+
+            return Response(res_json, status=resp.status_code)
+        except Exception as e:
+            print(f"❌ [Proxy Error] Device command failed: {e}")
             return Response({"code": 500, "msg": str(e)}, status=500)
 
 
@@ -3127,3 +3314,144 @@ class DronePositionViewSet(viewsets.ReadOnlyModelViewSet):
             "total_devices": total_devices,
             "device_statistics": list(device_stats)
         })
+
+
+
+class DockStatusViewSet(viewsets.ModelViewSet):
+    """
+    机场状态管理ViewSet
+    提供机场状态的CRUD和实时查询功能
+    """
+    queryset = DockStatus.objects.all()
+    serializer_class = DockStatusSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    search_fields = ["dock_sn", "dock_name"]
+    ordering_fields = ["last_update_time", "created_at", "job_number"]
+    ordering = ["-last_update_time"]
+
+    filterset_fields = {
+        "dock_sn": ["exact", "icontains"],
+        "dock_name": ["exact", "icontains"],
+        "is_online": ["exact"],
+        "mode_code": ["exact"],
+        "cover_state": ["exact"],
+        "alarm_state": ["exact"],
+        "last_update_time": ["gte", "lte", "range"],
+    }
+
+    @action(detail=False, methods=["get"])
+    def all_docks(self, request):
+        """
+        获取所有机场的最新状态
+        GET /api/dock-status/all_docks/
+        """
+        docks = DockStatus.objects.all().order_by("-last_update_time")
+        serializer = self.get_serializer(docks, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"])
+    def online_docks(self, request):
+        """
+        获取所有在线机场
+        GET /api/dock-status/online_docks/
+        """
+        docks = DockStatus.objects.filter(is_online=True).order_by("-last_update_time")
+        serializer = self.get_serializer(docks, many=True)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["get"])
+    def history(self, request, pk=None):
+        """
+        获取指定机场的历史状态（从DronePosition表查询）
+        GET /api/dock-status/{id}/history/?start_time=xxx&end_time=xxx
+        """
+        dock = self.get_object()
+        start_time = request.query_params.get("start_time")
+        end_time = request.query_params.get("end_time")
+
+        # 这里可以扩展为查询历史记录表，目前返回当前状态
+        return Response({
+            "dock_sn": dock.dock_sn,
+            "message": "历史记录功能待实现，当前仅返回最新状态",
+            "current_status": self.get_serializer(dock).data
+        })
+
+    @action(detail=False, methods=["get"])
+    def statistics(self, request):
+        """
+        获取机场统计信息
+        GET /api/dock-status/statistics/
+        """
+        from django.db.models import Count, Avg, Sum
+
+        total_docks = DockStatus.objects.count()
+        online_docks = DockStatus.objects.filter(is_online=True).count()
+        offline_docks = total_docks - online_docks
+        
+        # 统计有告警的机场
+        alarm_docks = DockStatus.objects.exclude(alarm_state=0).count()
+        
+        # 计算平均任务次数
+        avg_jobs = DockStatus.objects.aggregate(avg_jobs=Avg("job_number"))["avg_jobs"] or 0
+        
+        # 计算总累计时长
+        total_acc_time = DockStatus.objects.aggregate(total_time=Sum("acc_time"))["total_time"] or 0
+
+        return Response({
+            "total_docks": total_docks,
+            "online_docks": online_docks,
+            "offline_docks": offline_docks,
+            "alarm_docks": alarm_docks,
+            "average_job_number": round(avg_jobs, 2),
+            "total_accumulated_time_seconds": total_acc_time,
+            "total_accumulated_time_hours": round(total_acc_time / 3600, 2)
+        })
+
+    @action(detail=True, methods=["post"])
+    def update_from_mqtt(self, request, pk=None):
+        """
+        通过MQTT数据更新机场状态（内部使用）
+        POST /api/dock-status/{id}/update_from_mqtt/
+        Body: MQTT消息的data字段
+        """
+        dock = self.get_object()
+        mqtt_data = request.data
+
+        # 更新环境信息
+        if "environment_temperature" in mqtt_data:
+            dock.environment_temperature = mqtt_data["environment_temperature"]
+        if "temperature" in mqtt_data:
+            dock.temperature = mqtt_data["temperature"]
+        if "humidity" in mqtt_data:
+            dock.humidity = mqtt_data["humidity"]
+        if "wind_speed" in mqtt_data:
+            dock.wind_speed = mqtt_data["wind_speed"]
+        if "rainfall" in mqtt_data:
+            dock.rainfall = mqtt_data["rainfall"]
+
+        # 更新位置信息
+        if "latitude" in mqtt_data:
+            dock.latitude = mqtt_data["latitude"]
+        if "longitude" in mqtt_data:
+            dock.longitude = mqtt_data["longitude"]
+        if "height" in mqtt_data:
+            dock.height = mqtt_data["height"]
+
+        # 更新硬件状态
+        if "mode_code" in mqtt_data:
+            dock.mode_code = mqtt_data["mode_code"]
+        if "cover_state" in mqtt_data:
+            dock.cover_state = mqtt_data["cover_state"]
+        if "putter_state" in mqtt_data:
+            dock.putter_state = mqtt_data["putter_state"]
+
+        # 保存原始数据
+        dock.raw_osd_data = mqtt_data
+        dock.last_update_time = django_timezone.now()
+        dock.is_online = True
+        dock.save()
+
+        serializer = self.get_serializer(dock)
+        return Response(serializer.data)
+
