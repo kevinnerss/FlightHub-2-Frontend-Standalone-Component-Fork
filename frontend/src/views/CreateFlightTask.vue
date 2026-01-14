@@ -1,6 +1,5 @@
 <template>
   <div class="create-flight-task-premium">
-    <!-- 页面头部 -->
     <div class="page-header-premium">
       <div class="header-content">
         <div class="header-left">
@@ -17,7 +16,6 @@
       </div>
     </div>
 
-    <!-- 表单卡片 -->
     <div class="form-card-premium">
       <el-form
         ref="taskForm"
@@ -27,54 +25,17 @@
         class="task-form-premium"
         status-icon
       >
-        <!-- 任务名称 -->
         <el-form-item label="任务名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入任务名称"></el-input>
         </el-form-item>
 
-        <!-- 设备SN -->
         <el-form-item label="执行设备" prop="sn">
-          <!-- 快速选择最近使用的设备 -->
-          <el-input v-model="form.sn" placeholder="请输入或选择设备SN" class="full-width">
-            <template #append>
-              <el-dropdown @command="selectRecentDevice" :disabled="loadingRecentDevices">
-                <el-button :loading="loadingRecentDevices">
-                  最近使用
-                  <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-                </el-button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item v-if="recentDevices.length === 0" disabled>
-                      暂无历史记录
-                    </el-dropdown-item>
-                    <el-dropdown-item
-                      v-for="device in recentDevices"
-                      :key="device.sn"
-                      :command="device.sn"
-                      :label="device.sn"
-                    >
-                      <div style="display: flex; justify-content: space-between; align-items: center; min-width: 300px;">
-                        <div>
-                          <div style="font-weight: bold;">{{ device.sn }}</div>
-                          <div style="font-size: 12px; color: #909399;">{{ device.name }}</div>
-                        </div>
-                        <el-text size="small" type="info">{{ formatTime(device.last_used) }}</el-text>
-                      </div>
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
-            </template>
-          </el-input>
-
-          <!-- 设备列表下拉选择 -->
           <el-select
             v-model="form.sn"
-            placeholder="或从列表选择"
+            placeholder="请选择执行设备"
             class="full-width"
             :loading="loadingDevices"
             filterable
-            style="margin-top: 8px;"
           >
             <el-option
               v-for="device in devices"
@@ -88,21 +49,18 @@
           </el-select>
         </el-form-item>
 
-        <!-- 航线选择 -->
         <el-form-item label="选择航线" prop="wayline_uuid">
           <el-select v-model="form.wayline_uuid" placeholder="请选择航线" class="full-width" :loading="loadingWaylines">
             <el-option
               v-for="wayline in waylines"
               :key="wayline.id"
               :label="wayline.name"
-              :value="wayline.wayline_id || wayline.id" 
+              :value="wayline.wayline_id || wayline.id"
             >
-              <!-- assuming wayline object has name and id/wayline_id -->
             </el-option>
           </el-select>
         </el-form-item>
 
-        <!-- 任务类型 -->
         <el-form-item label="任务类型" prop="task_type">
           <el-select v-model="form.task_type" placeholder="请选择任务类型" class="full-width">
             <el-option label="立即任务 (Immediate)" value="immediate"></el-option>
@@ -112,38 +70,36 @@
           </el-select>
         </el-form-item>
 
-        <!-- 返航高度 -->
-        <el-form-item label="返航高度 (m)" prop="rth_altitude">
-          <el-input v-model.number="form.rth_altitude" type="number" :min="20" :max="500" placeholder="请输入返航高度 (20-500)" class="full-width"></el-input>
+       <el-form-item label="返航高度" prop="rth_altitude">
+          <el-input
+            v-model.number="form.rth_altitude"
+            placeholder="请输入 20-500 之间的整数"
+            class="full-width"
+          >
+            <template #suffix>
+              <span style="color: #94a3b8; margin-right: 5px;">米</span>
+            </template>
+          </el-input>
         </el-form-item>
-
-        <!-- 返航模式 -->
         <el-form-item label="返航模式" prop="rth_mode">
           <el-radio-group v-model="form.rth_mode">
-            <el-radio label="optimal">最优路径 (Optimal)</el-radio>
-            <el-radio label="preset">预设高度 (Preset)</el-radio>
+            <el-radio value="optimal">最优路径 (Optimal)</el-radio>
+            <el-radio value="preset">预设高度 (Preset)</el-radio>
           </el-radio-group>
         </el-form-item>
 
-        <!-- 航线精度类型 -->
         <el-form-item label="航线精度" prop="wayline_precision_type">
           <el-radio-group v-model="form.wayline_precision_type">
-            <el-radio label="rtk">RTK</el-radio>
-            <el-radio label="gps">GPS</el-radio>
+            <el-radio value="rtk">RTK</el-radio>
+            <el-radio value="gps">GPS</el-radio>
           </el-radio-group>
         </el-form-item>
 
-        <!-- 断点续飞 -->
         <el-form-item label="断点续飞" prop="resumable_status">
           <el-radio-group v-model="form.resumable_status">
-            <el-radio label="auto">自动 (Auto)</el-radio>
-            <el-radio label="manual">手动 (Manual)</el-radio>
+            <el-radio value="auto">自动 (Auto)</el-radio>
+            <el-radio value="manual">手动 (Manual)</el-radio>
           </el-radio-group>
-        </el-form-item>
-
-        <!-- 失控行为 (隐藏或高级选项) -->
-        <el-form-item label="失控行为" prop="out_of_control_action_in_flight" v-if="false">
-          <el-input v-model="form.out_of_control_action_in_flight"></el-input>
         </el-form-item>
 
         <el-form-item>
@@ -151,10 +107,7 @@
           <el-button @click="resetForm">重置</el-button>
         </el-form-item>
 
-        <!-- 任务控制按钮组 -->
-        <el-divider content-position="left">
-          <span class="divider-label">任务控制</span>
-        </el-divider>
+        <div class="section-title">任务控制</div>
 
         <el-form-item label="设备控制">
           <div class="control-section-premium">
@@ -220,7 +173,6 @@
       </el-form>
     </div>
 
-    <!-- 起飞确认弹窗 -->
     <el-dialog
       title="确认起飞"
       v-model="confirmDialogVisible"
@@ -236,9 +188,9 @@
       <template #footer>
         <span class="dialog-footer">
           <el-button @click="handleDialogClose">取消</el-button>
-          <el-button 
-            type="danger" 
-            @click="executeTask" 
+          <el-button
+            type="danger"
+            @click="executeTask"
             :disabled="countdown > 0"
             :loading="submitting"
           >
@@ -261,13 +213,11 @@ export default {
     return {
       loadingDevices: false,
       loadingWaylines: false,
-      loadingRecentDevices: false,
       submitting: false,
       confirmDialogVisible: false,
       countdown: 5,
       timer: null,
       devices: [],
-      recentDevices: [],
       waylines: [],
       commandLoading: {
         returnHome: false,
@@ -279,8 +229,8 @@ export default {
         name: '',
         sn: '',
         wayline_uuid: '',
-        time_zone: 'Asia/Chongqing', // Default parameter
-        rth_altitude: 100, // Default sensible value
+        time_zone: 'Asia/Chongqing',
+        rth_altitude: 100,
         rth_mode: 'optimal',
         wayline_precision_type: 'rtk',
         resumable_status: 'manual',
@@ -302,7 +252,9 @@ export default {
           { required: true, message: '请选择任务类型', trigger: 'change' }
         ],
         rth_altitude: [
-          { required: true, message: '请输入返航高度', trigger: 'blur' }
+          { required: true, message: '请输入返航高度', trigger: 'blur' },
+          { type: 'number', message: '返航高度必须为数字', trigger: 'blur' }, // 确保是数字
+          { type: 'number', min: 20, max: 500, message: '高度需在 20 到 500 米之间', trigger: 'blur' } // 限制范围
         ]
       }
     }
@@ -310,7 +262,6 @@ export default {
   mounted() {
     this.fetchDevices()
     this.fetchWaylines()
-    this.fetchRecentDevices()
   },
   beforeUnmount() {
     if (this.timer) clearInterval(this.timer)
@@ -330,11 +281,7 @@ export default {
     async fetchWaylines() {
       this.loadingWaylines = true
       try {
-        // Assuming getWaylines returns a list or a paginated object
         const res = await waylineApi.getWaylines({ page_size: 100 })
-        // Adapt based on actual API response structure.
-        // Based on waylineApi.js: return response (which is response.data)
-        // Usually Django DRF returns { results: [], count: ... } or just []
         if (Array.isArray(res)) {
           this.waylines = res
         } else if (res && res.results) {
@@ -347,37 +294,6 @@ export default {
       } finally {
         this.loadingWaylines = false
       }
-    },
-    async fetchRecentDevices() {
-      this.loadingRecentDevices = true
-      try {
-        const res = await flightTaskApi.getRecentDevices()
-        this.recentDevices = res || []
-      } catch (error) {
-        console.error('获取最近设备失败:', error)
-        this.recentDevices = []
-      } finally {
-        this.loadingRecentDevices = false
-      }
-    },
-    selectRecentDevice(sn) {
-      this.form.sn = sn
-      ElMessage.success(`已选择设备: ${sn}`)
-    },
-    formatTime(timeStr) {
-      if (!timeStr) return ''
-      const date = new Date(timeStr)
-      const now = new Date()
-      const diff = now - date
-      const minutes = Math.floor(diff / 60000)
-      const hours = Math.floor(diff / 3600000)
-      const days = Math.floor(diff / 86400000)
-
-      if (minutes < 1) return '刚刚'
-      if (minutes < 60) return `${minutes}分钟前`
-      if (hours < 24) return `${hours}小时前`
-      if (days < 7) return `${days}天前`
-      return date.toLocaleDateString('zh-CN')
     },
     submitForm() {
       this.$refs.taskForm.validate((valid) => {
@@ -411,8 +327,7 @@ export default {
       this.submitting = true
       try {
         const payload = {
-          ...this.form,
-          // Ensure numeric types if needed, though v-model.number or input-number handles it
+          ...this.form
         }
         const res = await flightTaskApi.createFlightTask(payload)
         if (res.code === 0) {
@@ -430,8 +345,6 @@ export default {
     },
     resetForm() {
       this.$refs.taskForm.resetFields()
-      // Reset defaults that might not be covered by resetFields if prop is missing in initial form?
-      // resetFields resets to initial value defined in data().
     },
 
     // 返航
@@ -548,641 +461,209 @@ export default {
   }
 }
 </script>
-
 <style scoped>
-/* ========== 主容器 ========== */
+/* ========== 全局容器与变量 ========== */
 .create-flight-task-premium {
+  --bg-dark-color: rgba(20, 30, 50, 0.6);
+  --border-color-base: rgba(59, 130, 246, 0.2);
+  --text-color-base: #ffffff;
+  
   max-width: 1200px;
   margin: 0 auto;
-  padding: 0;
+  padding: 20px;
   min-height: 100%;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
-/* ========== 页面头部 ========== */
-.page-header-premium {
-  margin-bottom: 32px;
-}
-
+/* ========== 头部样式 ========== */
+.page-header-premium { margin-bottom: 32px; }
 .header-content {
-  padding: 28px 36px;
-  background: rgba(26, 31, 58, 0.6);
-  backdrop-filter: blur(10px);
+  padding: 24px 32px;
+  background: rgba(13, 22, 45, 0.6);
+  backdrop-filter: blur(12px);
   border-radius: 16px;
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2), 0 0 40px rgba(59, 130, 246, 0.1);
-  animation: headerSlideIn 0.5s ease-out;
-}
-
-@keyframes headerSlideIn {
-  from {
-    opacity: 0;
-    transform: translateY(-20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.header-left {
+  border: 1px solid rgba(59, 130, 246, 0.2);
   display: flex;
   align-items: center;
-  gap: 20px;
 }
-
+.header-left { display: flex; align-items: center; gap: 20px; }
 .header-icon {
-  width: 48px;
-  height: 48px;
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  width: 48px; height: 48px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(37, 99, 235, 0.4) 100%);
+  border: 1px solid rgba(59, 130, 246, 0.5);
   border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
-  animation: iconPulse 3s ease-in-out infinite;
+  display: flex; align-items: center; justify-content: center; color: #60a5fa;
 }
-
-@keyframes iconPulse {
-  0%, 100% {
-    box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
-  }
-  50% {
-    box-shadow: 0 4px 24px rgba(59, 130, 246, 0.6);
-  }
-}
-
-.header-icon svg {
-  width: 28px;
-  height: 28px;
-}
-
-.page-title {
-  font-size: 28px;
-  font-weight: 700;
-  background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  margin: 0 0 8px 0;
-  letter-spacing: 0.5px;
-}
-
-.page-subtitle {
-  color: #94a3b8;
-  font-size: 14px;
-  margin: 0;
-  font-weight: 400;
-}
+.page-title { font-size: 26px; font-weight: 700; color: #ffffff; margin: 0 0 4px 0; }
+.page-subtitle { color: #94a3b8; font-size: 14px; margin: 0; }
 
 /* ========== 表单卡片 ========== */
 .form-card-premium {
-  background: rgba(10, 15, 35, 0.75);
-  backdrop-filter: blur(20px) saturate(180%);
+  background: rgba(13, 22, 45, 0.9);
+  backdrop-filter: blur(20px);
   border-radius: 16px;
   padding: 40px;
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  box-shadow:
-    0 20px 60px rgba(0, 0, 0, 0.5),
-    0 0 40px rgba(59, 130, 246, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  animation: cardSlideIn 0.5s ease-out;
+  border: 1px solid rgba(59, 130, 246, 0.15);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
 
-@keyframes cardSlideIn {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.task-form-premium { max-width: 900px; margin: 0 auto; }
+
+/* ========== 核心对齐修复 (修复返航高度对齐问题) ========== */
+
+/* 1. 强制每一行 Form Item 变成 Flex 容器，且必须垂直居中 */
+.task-form-premium :deep(.el-form-item) {
+  display: flex;
+  align-items: center !important; /* 关键：让 Label 和右侧内容垂直对齐 */
+  margin-bottom: 24px;
 }
 
-.task-form-premium {
-  max-width: 800px;
-  margin: 0 auto;
-}
-
-/* ========== 表单项样式 ========== */
+/* 2. 强制 Label 的高度和行高逻辑 */
 .task-form-premium :deep(.el-form-item__label) {
-  color: #cbd5e1;
+  color: #93c5fd;
   font-weight: 500;
-  text-align: left;
-  justify-content: flex-start;
-  white-space: nowrap;
+  padding-right: 20px;
+  height: auto !important;
+  line-height: 1.2 !important; /* 防止文字本身偏上 */
+  margin-bottom: 0 !important;
+  display: flex;
+  align-items: center; /* Label 内部文字居中 */
+  justify-content: flex-end;
 }
 
-/* 统一所有输入框样式 */
-.task-form-premium :deep(.el-input__wrapper) {
-  background: transparent !important;
-  border: 1px solid rgba(255, 255, 255, 0.2) !important;
-  box-shadow: none;
+/* 3. 关键修改：强制内容区域 (Input 所在的容器) 使用 Flex 居中 */
+.task-form-premium :deep(.el-form-item__content) {
+  line-height: 40px !important;
+  margin-left: 0 !important;
+  display: flex !important; /* 新增：让内部元素 Flex 布局 */
+  align-items: center !important; /* 新增：垂直居中 */
+}
+
+/* ========== 新增：小标题样式 (任务控制) ========== */
+.section-title {
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 600;
+  margin: 30px 0 20px 0;
+  padding-left: 12px;
+  border-left: 4px solid #409EFF; /* 左侧蓝色竖条 */
+  line-height: 1;
+}
+
+/* ========== 输入框外观统一 ========== */
+
+/* 强制 Input Number 撑满宽度并垂直对齐 */
+.task-form-premium :deep(.el-input-number) {
+  width: 100% !important;
+  line-height: 38px;
+  display: flex !important;
+  align-items: center;
+}
+.task-form-premium :deep(.el-input-number .el-input) {
+  width: 100% !important;
+}
+
+/* 统一 Wrapper 样式 */
+.task-form-premium :deep(.el-input__wrapper),
+.task-form-premium :deep(.el-textarea__inner),
+.task-form-premium :deep(.el-select__wrapper) {
+  background-color: var(--bg-dark-color) !important;
+  box-shadow: 0 0 0 1px var(--border-color-base) inset !important;
+  border-radius: 8px;
+  padding: 1px 11px;
+  height: 40px !important;
+  display: flex;
+  align-items: center;
   transition: all 0.3s ease;
 }
 
-.task-form-premium :deep(.el-input__wrapper:hover) {
-  border-color: rgba(255, 255, 255, 0.3) !important;
+/* 错误状态样式修复 */
+.task-form-premium :deep(.el-form-item.is-error .el-input__wrapper) {
+  background-color: rgba(245, 108, 108, 0.1) !important;
+  box-shadow: 0 0 0 1px #f56c6c inset !important;
+}
+.task-form-premium :deep(.el-form-item__error) {
+  padding-top: 4px;
+  color: #f56c6c;
 }
 
-.task-form-premium :deep(.el-input__wrapper.is-focus) {
-  border-color: rgba(255, 255, 255, 0.4) !important;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1) !important;
-}
-
+/* 输入框内部文字 */
 .task-form-premium :deep(.el-input__inner) {
   color: #ffffff !important;
   background: transparent !important;
   border: none !important;
-  box-shadow: none !important;
+  height: 100% !important;
+  font-family: inherit;
+  line-height: 40px !important;
 }
 
-.task-form-premium :deep(.el-input__inner)::placeholder {
-  color: rgba(255, 255, 255, 0.5) !important;
-}
-
-.task-form-premium :deep(.el-input-number) {
-  width: 100%;
-}
-
-.task-form-premium :deep(.el-input-number .el-input__wrapper) {
-  height: 32px;
-  background: transparent !important;
-  border: 1px solid rgba(255, 255, 255, 0.2) !important;
-  box-shadow: none;
-}
-
-.task-form-premium :deep(.el-input-number .el-input__wrapper:hover) {
-  border-color: rgba(255, 255, 255, 0.3) !important;
-}
-
-.task-form-premium :deep(.el-input-number .el-input__wrapper.is-focus) {
-  border-color: rgba(255, 255, 255, 0.4) !important;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1) !important;
-}
-
-.task-form-premium :deep(.el-input-number .el-input__inner) {
-  background: transparent !important;
-  color: #ffffff !important;
+/* Input Number 加减按钮修复 */
+.task-form-premium :deep(.el-input-number__decrease),
+.task-form-premium :deep(.el-input-number__increase) {
+  background-color: rgba(255, 255, 255, 0.05) !important;
   border: none !important;
-  box-shadow: none !important;
-}
-
-.task-form-premium :deep(.el-select) {
-  width: 100%;
-}
-
-.task-form-premium :deep(.el-select .el-input__wrapper) {
-  background: transparent !important;
-  border: 1px solid rgba(255, 255, 255, 0.2) !important;
-}
-
-.task-form-premium :deep(.el-select-dropdown) {
-  background: rgba(10, 15, 35, 0.95);
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  backdrop-filter: blur(10px);
-}
-
-.task-form-premium :deep(.el-select-dropdown__item) {
-  color: #cbd5e1;
-}
-
-.task-form-premium :deep(.el-select-dropdown__item:hover) {
-  background: rgba(59, 130, 246, 0.1);
-}
-
-.task-form-premium :deep(.el-select-dropdown__item.selected) {
-  background: rgba(59, 130, 246, 0.2);
-  color: #60a5fa;
-}
-
-.task-form-premium :deep(.el-radio-group) {
-  display: flex;
-  gap: 24px;
-}
-
-.task-form-premium :deep(.el-radio__label) {
-  color: #cbd5e1;
-}
-
-.task-form-premium :deep(.el-radio__input.is-checked .el-radio__inner) {
-  background: #3b82f6;
-  border-color: #3b82f6;
-}
-
-/* ========== 按钮样式 ========== */
-/* 确保按钮不受透明背景影响 */
-.task-form-premium :deep(.el-button) {
-  background: initial !important;
-}
-
-.task-form-premium :deep(.el-button--primary) {
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
-  border: none;
-  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.4);
-  transition: all 0.3s ease;
-}
-
-.task-form-premium :deep(.el-button--primary:hover) {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.5);
-}
-
-.task-form-premium :deep(.el-button--primary:active) {
-  transform: translateY(0);
-}
-
-.task-form-premium :deep(.el-button--default) {
-  background: rgba(59, 130, 246, 0.1) !important;
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  color: #60a5fa;
-  transition: all 0.3s ease;
-}
-
-.task-form-premium :deep(.el-button--default:hover) {
-  background: rgba(59, 130, 246, 0.2) !important;
-  border-color: rgba(59, 130, 246, 0.5);
-}
-
-/* ========== 分割线 ========== */
-.task-form-premium :deep(.el-divider) {
-  border-top-color: rgba(59, 130, 246, 0.2);
-}
-
-.task-form-premium :deep(.el-divider__text) {
-  background: transparent;
-  color: #94a3b8;
-  font-weight: 500;
-}
-
-.divider-label {
-  color: #94a3b8;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-/* ========== 控制按钮区域 ========== */
-.control-section-premium {
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 12px;
-  padding: 24px;
-  border: 1px solid rgba(59, 130, 246, 0.2);
-}
-
-.control-buttons-premium {
-  display: flex;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-bottom: 16px;
-}
-
-.control-btn-premium {
+  color: #ffffff !important;
+  width: 40px;
+  height: 38px !important;
+  top: 1px !important;
+  z-index: 10;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 24px;
-  font-size: 15px;
-  font-weight: 500;
-  border-radius: 8px;
-  transition: all 0.3s ease;
-  position: relative;
-  overflow: hidden;
+  justify-content: center;
+}
+.task-form-premium :deep(.el-input-number__decrease) { left: 1px; border-right: 1px solid rgba(255,255,255,0.1) !important; }
+.task-form-premium :deep(.el-input-number__increase) { right: 1px; border-left: 1px solid rgba(255,255,255,0.1) !important; }
+
+/* 悬停与聚焦 */
+.task-form-premium :deep(.el-input__wrapper:hover),
+.task-form-premium :deep(.el-select__wrapper:hover) {
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.6) inset !important;
+}
+.task-form-premium :deep(.el-input__wrapper.is-focus),
+.task-form-premium :deep(.el-select__wrapper.is-focused) {
+  box-shadow: 0 0 0 1px #3b82f6 inset, 0 0 0 3px rgba(59, 130, 246, 0.2) !important;
+  background-color: rgba(59, 130, 246, 0.15) !important;
 }
 
-.control-btn-premium::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-  transition: left 0.5s ease;
+/* ========== 其他组件样式 ========== */
+.task-form-premium :deep(.el-radio-group) {
+  height: 40px; display: flex; align-items: center;
+}
+.task-form-premium :deep(.el-radio) { margin-right: 32px; height: 32px; }
+.task-form-premium :deep(.el-radio__label) { color: #cbd5e1; }
+.task-form-premium :deep(.el-radio__input.is-checked + .el-radio__label) { color: #60a5fa; font-weight: bold; }
+.task-form-premium :deep(.el-radio__inner) { background: transparent; border-color: rgba(255, 255, 255, 0.4); }
+.task-form-premium :deep(.el-radio__input.is-checked .el-radio__inner) { background: #3b82f6; border-color: #3b82f6; }
+
+/* 按钮高度固定 */
+.task-form-premium :deep(.el-button) { height: 36px; border-radius: 6px; border: none; }
+.task-form-premium :deep(.el-button--primary) {
+  background: linear-gradient(90deg, #2563eb, #3b82f6); color: white;
+}
+.task-form-premium :deep(.el-button--default) {
+  background: transparent; border: 1px solid rgba(255, 255, 255, 0.2) !important; color: #cbd5e1;
+}
+.task-form-premium :deep(.el-button--default:hover) { border-color: #fff !important; color: #fff; }
+
+.control-section-premium {
+  background: rgba(0, 0, 0, 0.2); border: 1px dashed rgba(59, 130, 246, 0.3); border-radius: 8px; padding: 20px;
+}
+.control-buttons-premium { display: flex; gap: 12px; flex-wrap: wrap; }
+.control-btn-premium {
+  height: 34px !important; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.3) !important; color: #93c5fd;
 }
 
-.control-btn-premium:hover::before {
-  left: 100%;
-}
-
-.control-btn-premium:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
-}
-
-.control-btn-premium:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-icon {
-  width: 18px;
-  height: 18px;
-}
-
-.warning-btn {
-  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-  border: none;
-  color: #fff;
-  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.4);
-}
-
-.warning-btn:hover:not(:disabled) {
-  box-shadow: 0 6px 20px rgba(245, 158, 11, 0.5);
-}
-
-.default-btn {
-  background: rgba(59, 130, 246, 0.1);
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  color: #60a5fa;
-}
-
-.default-btn:hover:not(:disabled) {
-  background: rgba(59, 130, 246, 0.2);
-  border-color: rgba(59, 130, 246, 0.5);
-}
-
-.info-btn {
-  background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
-  border: none;
-  color: #fff;
-  box-shadow: 0 4px 16px rgba(6, 182, 212, 0.4);
-}
-
-.info-btn:hover:not(:disabled) {
-  box-shadow: 0 6px 20px rgba(6, 182, 212, 0.5);
-}
-
-.success-btn {
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-  border: none;
-  color: #fff;
-  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.4);
-}
-
-.success-btn:hover:not(:disabled) {
-  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5);
-}
-
-.control-tip {
-  padding-top: 8px;
-  border-top: 1px solid rgba(59, 130, 246, 0.1);
-}
-
-/* ========== 确认弹窗 ========== */
-.confirm-content {
-  text-align: center;
-  padding: 20px 0;
-}
-
-.confirm-icon {
-  font-size: 48px;
-  margin: 0 0 16px;
-}
-
-.confirm-text {
-  font-size: 18px;
-  font-weight: bold;
-  color: #303133;
-  margin: 0 0 8px;
-}
-
-.confirm-subtext {
-  color: #909399;
-  font-size: 14px;
-  margin: 0;
-}
-
-.full-width {
-  width: 100%;
-}
-
-/* ========== 响应式 ========== */
 @media (max-width: 768px) {
-  .header-content {
-    padding: 20px 24px;
+  .form-card-premium { padding: 20px; }
+  .task-form-premium :deep(.el-form-item__label) { 
+    text-align: left; 
+    margin-bottom: 8px; 
+    line-height: normal !important;
+    height: auto !important;
+    justify-content: flex-start;
   }
-
-  .header-left {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 16px;
-  }
-
-  .page-title {
-    font-size: 24px;
-  }
-
-  .form-card-premium {
-    padding: 24px;
-  }
-
-  .task-form-premium {
-    max-width: 100%;
-  }
-
-  .task-form-premium :deep(.el-form-item__label) {
-    width: 100% !important;
-    text-align: left;
-    margin-bottom: 8px;
-  }
-
   .task-form-premium :deep(.el-form-item) {
-    display: block;
+    display: block; 
   }
-
-  .task-form-premium :deep(.el-form-item__content) {
-    margin-left: 0 !important;
-  }
-
-  .task-form-premium :deep(.el-radio-group) {
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .control-buttons-premium {
-    flex-direction: column;
-  }
-
-  .control-btn-premium {
-    width: 100%;
-    justify-content: center;
-  }
-}
-</style>
-
-<style>
-/* 覆盖 Element Plus 的 CSS 变量 - 设置为透明 */
-:root {
-  --el-fill-color-blank: transparent !important;
-  --el-bg-color: transparent !important;
-}
-
-/* ========== 全局 Element UI 下拉菜单深色主题 ========== */
-/* el-select 下拉选项 */
-.el-select-dropdown {
-  background: rgba(10, 15, 35, 0.98) !important;
-  border: 1px solid rgba(59, 130, 246, 0.3) !important;
-  backdrop-filter: blur(20px);
-}
-
-.el-select-dropdown__item {
-  color: #cbd5e1 !important;
-}
-
-.el-select-dropdown__item:hover {
-  background: rgba(59, 130, 246, 0.15) !important;
-}
-
-.el-select-dropdown__item.selected {
-  color: #60a5fa !important;
-  background: rgba(59, 130, 246, 0.2) !important;
-}
-
-/* el-dropdown 下拉菜单 */
-.el-dropdown-menu {
-  background: rgba(10, 15, 35, 0.98) !important;
-  border: 1px solid rgba(59, 130, 246, 0.3) !important;
-  backdrop-filter: blur(20px);
-}
-
-.el-dropdown-menu__item {
-  color: #cbd5e1 !important;
-}
-
-.el-dropdown-menu__item:hover {
-  background: rgba(59, 130, 246, 0.15) !important;
-}
-
-.el-dropdown-menu__item:focus {
-  background: rgba(59, 130, 246, 0.15) !important;
-  color: #60a5fa !important;
-}
-
-/* el-option 组件 */
-.el-option {
-  color: #cbd5e1 !important;
-}
-
-.el-option:hover {
-  background: rgba(59, 130, 246, 0.15) !important;
-}
-
-.el-option.selected {
-  color: #60a5fa !important;
-}
-
-/* 滚动条样式 */
-.el-select-dropdown .el-scrollbar__wrap {
-  background: transparent !important;
-}
-
-.el-select-dropdown__wrap {
-  background: transparent !important;
-}
-
-/* ========== 全局 Element UI 输入框深色主题 ========== */
-/* el-form-item 表单项容器 */
-.el-form-item__content,
-.el-form-item__content .el-input,
-.el-form-item__content .el-select,
-.el-form-item__content .el-textarea {
-  background: transparent !important;
-}
-
-/* 只修改颜色，不影响功能 */
-.el-input__wrapper {
-  background: transparent !important;
-  border: 1px solid rgba(255, 255, 255, 0.2) !important;
-}
-
-/* 只针对 input-number */
-.el-input-number .el-input__wrapper {
-  background: transparent !important;
-  border: 1px solid rgba(255, 255, 255, 0.2) !important;
-}
-
-.el-input-number {
-  width: auto;
-}
-
-.el-input__wrapper:hover,
-.el-input-number .el-input__wrapper:hover {
-  border-color: rgba(255, 255, 255, 0.3) !important;
-}
-
-.el-input__wrapper.is-focus,
-.el-input-number .el-input__wrapper.is-focus {
-  border-color: rgba(255, 255, 255, 0.4) !important;
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.1) !important;
-}
-
-/* el-input 内部输入框 */
-input.el-input__inner,
-.el-input__inner,
-.el-input-number .el-input__inner {
-  color: #ffffff !important;
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-}
-
-input.el-input__inner::placeholder,
-.el-input__inner::placeholder {
-  color: rgba(255, 255, 255, 0.5) !important;
-}
-
-/* el-input-group 附加元素 */
-.el-input-group__append,
-.el-input-group__prepend {
-  background-color: var(--el-fill-color-light, transparent) !important;
-  border: 1px solid var(--el-border-color, rgba(255, 255, 255, 0.2)) !important;
-  color: var(--el-text-color-regular, #ffffff) !important;
-}
-
-.el-input-group__append .el-button,
-.el-input-group__prepend .el-button {
-  background: transparent !important;
-  color: inherit !important;
-}
-
-/* textarea 多行输入 */
-textarea.el-textarea__inner,
-.el-textarea__inner {
-  border: 1px solid rgba(255, 255, 255, 0.2) !important;
-  color: #ffffff !important;
-}
-
-textarea.el-textarea__inner::placeholder,
-.el-textarea__inner::placeholder {
-  color: rgba(255, 255, 255, 0.5) !important;
-}
-
-textarea.el-textarea__inner:focus,
-.el-textarea__inner:focus {
-  border-color: rgba(255, 255, 255, 0.4) !important;
-}
-
-/* 确保所有表单元素完全透明背景 */
-.el-input__inner,
-.el-textarea__inner,
-.el-input-number__inner {
-  background: transparent !important;
-}
-
-/* 选择器下拉项文字颜色 */
-.el-select-dropdown__item,
-.el-option {
-  color: #ffffff !important;
-}
-
-.el-select-dropdown__item:hover,
-.el-option:hover {
-  background: rgba(255, 255, 255, 0.1) !important;
-}
-
-.el-select-dropdown__item.selected,
-.el-option.selected {
-  color: #60a5fa !important;
 }
 </style>

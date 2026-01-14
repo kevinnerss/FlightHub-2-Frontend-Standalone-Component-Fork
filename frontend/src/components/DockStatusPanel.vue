@@ -1,11 +1,7 @@
 <template>
   <div class="dock-status-panel">
-    <!-- 头部标题栏 -->
+    <!-- 头部操作栏 -->
     <div class="panel-header">
-      <h3 class="panel-title">
-        <span class="icon">🏭</span>
-        机场状态监控
-      </h3>
       <div class="header-actions">
         <button @click="refreshData" class="btn-refresh" :disabled="loading">
           <span v-if="!loading">🔄</span>
@@ -449,26 +445,11 @@ export default {
 
 .panel-header {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   margin-bottom: 24px;
   padding-bottom: 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.panel-title {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: #f1f5f9;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.panel-title .icon {
-  font-size: 24px;
-  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.4));
 }
 
 .header-actions {
@@ -809,10 +790,11 @@ export default {
   backdrop-filter: blur(20px);
   border: 1px solid rgba(56, 189, 248, 0.3);
   border-radius: 16px;
-  width: 90%;
-  max-width: 800px;
-  max-height: 90vh;
-  overflow-y: auto;
+  width: 95%;
+  max-width: 1400px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 40px rgba(56, 189, 248, 0.1);
 }
 
@@ -820,13 +802,17 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 24px;
+  padding: 10px 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  position: sticky;
+  top: 0;
+  background: rgba(30, 41, 59, 0.95);
+  z-index: 10;
 }
 
 .modal-header h3 {
   margin: 0;
-  font-size: 20px;
+  font-size: 16px;
   color: #f1f5f9;
   font-weight: 600;
 }
@@ -854,11 +840,13 @@ export default {
 }
 
 .modal-body {
-  padding: 24px;
+  padding: 8px 12px;
+  overflow-y: auto;
+  flex: 1;
 }
 
 .detail-section {
-  margin-bottom: 24px;
+  margin-bottom: 8px;
 }
 
 .detail-section:last-child {
@@ -866,39 +854,42 @@ export default {
 }
 
 .detail-section h4 {
-  margin: 0 0 16px 0;
-  font-size: 16px;
+  margin: 0 0 4px 0;
+  font-size: 10px;
   color: #f1f5f9;
-  padding-bottom: 8px;
-  border-bottom: 2px solid rgba(56, 189, 248, 0.5);
+  padding-bottom: 2px;
+  border-bottom: 1px solid rgba(56, 189, 248, 0.5);
   font-weight: 600;
 }
 
 .detail-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
 }
 
 .detail-item {
   display: flex;
-  justify-content: space-between;
-  padding: 8px 12px;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px 4px;
   background: rgba(255, 255, 255, 0.03);
-  border-radius: 6px;
+  border-radius: 3px;
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .detail-label {
-  font-size: 14px;
+  font-size: 8px;
   color: #94a3b8;
   font-weight: 500;
 }
 
 .detail-value {
-  font-size: 14px;
+  font-size: 9px;
   color: #e2e8f0;
   font-weight: 600;
+  word-break: break-all;
+  line-height: 1.2;
 }
 
 .text-success {

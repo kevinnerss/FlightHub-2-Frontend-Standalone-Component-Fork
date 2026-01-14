@@ -132,8 +132,8 @@ export default {
       loading: false,
       hasError: false,
       errorMessage: '',
-      // 监听状态
-      isMonitoring: false,
+      // 监听状态 - 从 localStorage 恢复
+      isMonitoring: this.getStoredMonitorStatus(),
       monitorLoading: false,
       monitorCheckTimer: null
     }
@@ -153,7 +153,9 @@ export default {
     // 直接初始化原生播放器，不需要等待 flv.js
     this.initPlayer()
 
-    this.checkMonitorStatus()
+    // 🔥 优先从服务器获取真实状态,然后同步到本地
+    this.syncMonitorStatusFromServer()
+
     // 定时检查监听状态
     this.monitorCheckTimer = setInterval(() => {
       this.checkMonitorStatus()
@@ -166,6 +168,55 @@ export default {
     }
   },
   methods: {
+    // ========== 监听状态持久化方法 ==========
+    getStorageKey() {
+      return `monitor_status_${this.streamId}`
+    },
+
+    getStoredMonitorStatus() {
+      try {
+        const key = this.getStorageKey()
+        const stored = localStorage.getItem(key)
+        if (stored) {
+          const data = JSON.parse(stored)
+          // 检查是否过期(超过1小时则认为已失效)
+          const now = Date.now()
+          if (data.timestamp && (now - data.timestamp) < 3600000) {
+            console.log(`从本地恢复监听状态: ${data.isMonitoring}`)
+            return data.isMonitoring
+          }
+        }
+      } catch (err) {
+        console.warn('读取本地监听状态失败:', err)
+      }
+      return false
+    },
+
+    setStoredMonitorStatus(status) {
+      try {
+        const key = this.getStorageKey()
+        const data = {
+          isMonitoring: status,
+          timestamp: Date.now(),
+          streamId: this.streamId
+        }
+        localStorage.setItem(key, JSON.stringify(data))
+        console.log(`保存监听状态: ${status}`)
+      } catch (err) {
+        console.warn('保存监听状态失败:', err)
+      }
+    },
+
+    clearStoredMonitorStatus() {
+      try {
+        const key = this.getStorageKey()
+        localStorage.removeItem(key)
+        console.log('清除本地监听状态')
+      } catch (err) {
+        console.warn('清除监听状态失败:', err)
+      }
+    },
+
     // 动态加载 flv.js (已废弃，保留空函数防止报错)
     loadFlvJs() {
       console.log('FMP4 模式：无需加载 flv.js')
@@ -311,11 +362,14 @@ export default {
         const response = await liveMonitorApi.startMonitor(this.streamId, 3.0)
         console.log('✅ 监听已启动:', response)
         this.isMonitoring = true
+        // 🔥 保存状态到本地
+        this.setStoredMonitorStatus(true)
         this.$emit('monitor-started', response)
       } catch (err) {
         console.error('❌ 启动监听失败:', err)
         const errorMsg = err.response?.data?.message || err.message || '启动失败'
         alert(`启动保护区检测失败: ${errorMsg}`)
+        // 失败时不保存状态
       } finally {
         this.monitorLoading = false
       }
@@ -327,11 +381,16 @@ export default {
         const response = await liveMonitorApi.stopMonitor(this.streamId)
         console.log('✅ 监听已停止:', response)
         this.isMonitoring = false
+        // 🔥 清除本地状态
+        this.clearStoredMonitorStatus()
         this.$emit('monitor-stopped', response)
       } catch (err) {
         console.error('❌ 停止监听失败:', err)
         const errorMsg = err.response?.data?.message || err.message || '停止失败'
         alert(`停止保护区检测失败: ${errorMsg}`)
+        // 即使失败也尝试清除本地状态(假设后端已停止)
+        this.isMonitoring = false
+        this.clearStoredMonitorStatus()
       } finally {
         this.monitorLoading = false
       }
@@ -340,10 +399,46 @@ export default {
     async checkMonitorStatus() {
       try {
         const status = await liveMonitorApi.getStatus(this.streamId)
-        this.isMonitoring = status.is_running || false
+        const serverIsRunning = status.is_running || false
+
+        // 🔥 如果服务器状态与本地不一致,以服务器为准
+        if (serverIsRunning !== this.isMonitoring) {
+          console.log(`状态不一致! 本地: ${this.isMonitoring}, 服务器: ${serverIsRunning}, 以服务器为准`)
+          this.isMonitoring = serverIsRunning
+          // 同步到本地存储
+          if (serverIsRunning) {
+            this.setStoredMonitorStatus(true)
+          } else {
+            this.clearStoredMonitorStatus()
+          }
+        }
       } catch (err) {
         // 静默失败，不影响用户使用
         console.warn('检查监听状态失败:', err)
+      }
+    },
+
+    // 🔥 新增: 从服务器同步状态到本地
+    async syncMonitorStatusFromServer() {
+      try {
+        const status = await liveMonitorApi.getStatus(this.streamId)
+        const serverIsRunning = status.is_running || false
+
+        console.log(`从服务器同步监听状态: ${serverIsRunning}`)
+
+        // 🔥 以服务器状态为准,覆盖本地状态
+        this.isMonitoring = serverIsRunning
+
+        // 同步到本地存储
+        if (serverIsRunning) {
+          this.setStoredMonitorStatus(true)
+        } else {
+          this.clearStoredMonitorStatus()
+        }
+      } catch (err) {
+        // 如果服务器查询失败,使用本地缓存的状态
+        console.warn('从服务器同步状态失败,使用本地缓存:', err)
+        // 此时 isMonitoring 已经在 data() 中从 localStorage 恢复了
       }
     }
   }

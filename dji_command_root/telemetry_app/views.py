@@ -622,7 +622,8 @@ def minio_poller_worker():
     [最终优化版] 智能任务扫描
     逻辑：扫描 MinIO -> 自动建任务 -> 调接口补全信息 -> 持续检测 -> 超时判断结束
     """
-    print("🕵️ [Poller] 智能扫描已启动 (支持断点续飞+自动重开)...")
+    print("🕵️ [Poller] 智能扫描已启动 (支持断点续飞+自动重开+固定命名文件夹)...")
+    import re  # 🔥 移到函数开头，避免循环中重复import
     s3 = get_minio_client()
     bucket_name = getattr(settings, "MINIO_BUCKET_NAME", "dji")
 
@@ -630,10 +631,27 @@ def minio_poller_worker():
     # 只有超过 45 分钟没有新图，且司空说结束了，我们才真的结束
     SILENCE_TIMEOUT_MINUTES = getattr(settings, 'TASK_SILENCE_TIMEOUT_MINUTES', 45)
 
+    # 🔥 定义检测类型映射
+    DETECT_TYPE_MAPPING = {
+        '铁路': 'rail',
+        '接触网': 'contactline',
+        '桥梁': 'bridge',
+        '保护区': 'protected_area'
+    }
+
+    # 🔥 固定命名文件夹超时时间
+    FIXED_FOLDER_TIMEOUT = 10
+
+    # 🔥 固定命名文件夹匹配正则
+    FIXED_FOLDER_PATTERN = re.compile(r'^(\d{8})(铁路|接触网|桥梁|保护区)$')
+
     while True:
         try:
             # 1. 扫描 MinIO 发现 Task UUID 和它的 真实路径前缀
             found_tasks = {}  # {uuid: full_prefix_path}
+
+            # 🔥 新增：扫描固定命名格式的文件夹
+            found_fixed_folders = {}  # {folder_name: full_prefix_path}
 
             paginator = s3.get_paginator('list_objects_v2')
 
@@ -660,6 +678,36 @@ def minio_poller_worker():
 
                                 # 存入字典
                                 found_tasks[uuid_val] = prefix_path
+                        except:
+                            pass
+
+                    # 🔥 新增：扫描固定命名格式的文件夹
+                    # 格式: YYYYMMDD + 检测类型，例如 20260113桥梁
+                    # 路径格式: fh_sync/media/YYYYMMDD检测类型/...
+                    if "/media/" in key:
+                        parts = key.split("/")
+                        try:
+                            idx = parts.index("media")
+                            if len(parts) > idx + 1:
+                                folder_name = parts[idx + 1]
+
+                                # 检查是否符合固定命名格式: 8位数字 + 检测类型
+                                match = FIXED_FOLDER_PATTERN.match(folder_name)
+
+                                if match:
+                                    date_str = match.group(1)  # 20260113
+                                    detect_type_cn = match.group(2)  # 桥梁
+
+                                    # 构造完整前缀路径
+                                    prefix_path = "/".join(parts[:idx + 2]) + "/"
+
+                                    # 存入字典
+                                    found_fixed_folders[folder_name] = {
+                                        'prefix': prefix_path,
+                                        'date': date_str,
+                                        'detect_type_cn': detect_type_cn,
+                                        'detect_type': DETECT_TYPE_MAPPING.get(detect_type_cn, 'rail')
+                                    }
                         except:
                             pass
 
@@ -770,6 +818,113 @@ def minio_poller_worker():
                     else:
                         # 极端情况：还没收到过图片，先不管
                         pass
+
+            # =========================================================
+            # 🔥 新增：处理固定命名格式的文件夹
+            # =========================================================
+            for folder_name, folder_info in found_fixed_folders.items():
+                prefix_path = folder_info['prefix']
+                date_str = folder_info['date']  # 20260113
+                detect_type_cn = folder_info['detect_type_cn']  # 桥梁
+                detect_type = folder_info['detect_type']  # bridge
+
+                # 构造任务ID
+                task_id = f"{date_str}{detect_type_cn}"
+
+                # 检查是否已存在该任务
+                task, created = InspectTask.objects.get_or_create(
+                    external_task_id=task_id,
+                    defaults={
+                        "bucket": bucket_name,
+                        "detect_status": "processing",
+                        "prefix_list": [prefix_path],
+                        "dji_task_name": f"{detect_type_cn}检测({date_str})"
+                    }
+                )
+
+                if created:
+                    print(f"📁 [Fixed Folder] 发现新文件夹并创建任务: {folder_name}, 路径: {prefix_path}")
+                    print(f"✅ [Fixed Folder] 任务ID: {task_id}")
+
+                    # 🔥 创建父任务 (与其他任务保持一致的命名规则)
+                    parent_task_id = f"{date_str}巡检任务"
+                    parent_task, _ = InspectTask.objects.get_or_create(
+                        external_task_id=parent_task_id,
+                        defaults={
+                            "detect_status": "pending",
+                            "bucket": bucket_name,
+                            "prefix_list": []
+                        }
+                    )
+
+                    # 设置父任务关系
+                    task.parent_task = parent_task
+                    task.save()
+
+                    print(f"📂 [Fixed Folder] 父任务: {parent_task_id}")
+
+                # 获取或创建对应的检测类型
+                category, _ = AlarmCategory.objects.get_or_create(
+                    code=detect_type.upper(),
+                    defaults={
+                        "name": detect_type_cn,
+                        "match_keyword": detect_type_cn
+                    }
+                )
+
+                # 更新任务的检测类型
+                if task.detect_category != category:
+                    task.detect_category = category
+                    task.save()
+
+                # 同步图片
+                new_images_count = sync_images_core(task)
+
+                if new_images_count > 0:
+                    current_time = django_timezone.now()
+                    task.last_image_uploaded_at = current_time
+
+                    # 如果任务之前已经 Done 了，现在又有新图，强制"复活"
+                    if task.detect_status == "done":
+                        print(f"🚀 [Re-open Fixed] 任务 {task_id} 收到新图，重新标记为处理中...")
+                        task.detect_status = "processing"
+
+                    task.save()
+                    print(f"📸 [Fixed Folder] 任务 {task_id} 同步了 {new_images_count} 张新图")
+
+                # 检查是否有待检测图片
+                pending_count = InspectImage.objects.filter(
+                    inspect_task=task,
+                    detect_status='pending'
+                ).count()
+
+                if pending_count > 0:
+                    # 防止重复启动检测
+                    processing_count = InspectImage.objects.filter(
+                        inspect_task=task,
+                        detect_status='processing'
+                    ).count()
+
+                    if processing_count == 0:
+                        print(f"🚀 [Fixed Folder] 任务 {task_id} 有 {pending_count} 张待检测图片，触发检测...")
+                        threading.Thread(target=auto_trigger_detect, args=(task,)).start()
+                    else:
+                        print(f"⏳ [Fixed Folder] 任务 {task_id} 有 {processing_count} 张图片正在检测中，跳过重复启动")
+
+                # 判断任务结束 (固定命名文件夹使用更短的超时时间，因为通常是手动上传)
+                if task.detect_status == "processing":
+                    if task.last_image_uploaded_at:
+                        time_since_last = django_timezone.now() - task.last_image_uploaded_at
+                        minutes_silent = time_since_last.total_seconds() / 60
+
+                        # 固定命名文件夹超时时间设置为10分钟
+                        FIXED_FOLDER_TIMEOUT = 10
+
+                        if minutes_silent > FIXED_FOLDER_TIMEOUT:
+                            print(f"✅ [Fixed Folder Done] 任务 {task_id} 已静默 {int(minutes_silent)} 分钟，自动结束。")
+                            task.detect_status = "done"
+                            task.finished_at = django_timezone.now()
+                            task.save()
 
         except Exception as e:
             print(f"❌ Poller Error: {e}")
@@ -2090,16 +2245,26 @@ class LiveMonitorViewSet(viewsets.ViewSet):
 
         # 循环抽帧（直到收到停止信号）
         while not stop_event.is_set():
+            # 🔥 在每次循环开始都检查停止信号，确保快速响应
+            if stop_event.is_set():
+                break
+
             try:
                 snap_api = f"{ZLM_API_HOST}/index/api/getSnap"
                 params = {
                     "secret": ZLM_SECRET,
                     "url": f"rtmp://127.0.0.1:1935/live/{stream_id}",
-                    "timeout_sec": 5,
+                    "timeout_sec": 5,  # 🔥 ZLM服务器超时时间(5秒)
                     "expire_sec": 1
                 }
 
-                resp = requests.get(snap_api, params=params, timeout=10)
+                # 🔥 requests库超时(8秒),给足够时间完成截图,但不会太久影响停止响应
+                resp = requests.get(snap_api, params=params, timeout=8)
+
+                # 🔥 在处理响应前再次检查停止信号
+                if stop_event.is_set():
+                    print(f"⚠️ [停止中断] 收到停止信号，放弃处理当前帧")
+                    break
 
                 # 🔥 修复：检查HTTP状态码，避免失败时直接抛异常
                 if resp.status_code != 200:
@@ -2163,6 +2328,11 @@ class LiveMonitorViewSet(viewsets.ViewSet):
 
                         print(f"📂 [任务创建] [{parent_task_id}] -> [{sub_task_id}]")
                         first_frame_captured = True
+
+                    # 🔥 在上传前再次检查停止信号
+                    if stop_event.is_set():
+                        print(f"⚠️ [停止中断] 收到停止信号，放弃上传当前帧")
+                        break
 
                     # 🔥 修复：直接使用resp.content，不需要再次下载
                     file_bytes = io.BytesIO(resp.content)
