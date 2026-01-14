@@ -24,10 +24,14 @@ RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua
 # 6. 拷贝项目代码
 COPY . /app/
 
-# 7. 收集静态文件
-RUN python manage.py collectstatic --noinput
+# 7. 拷贝启动脚本
+COPY docker-entrypoint.sh /app/
+RUN chmod +x /app/docker-entrypoint.sh
 
-# 8. 启动 gunicorn（统一用 8001 端口）
+# 8. 设置入口点
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+
+# 9. 启动 gunicorn（统一用 8001 端口）
 CMD ["gunicorn", "dji_command_root.wsgi:application", \
 "--bind", "0.0.0.0:8001", \
 "--workers", "3", \

@@ -1,0 +1,20 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dji-command-backend
+    ports:
+      - "8001:8001"
+    # 挂载本地数据库文件
+    volumes:
+      - ./db.sqlite3:/app/db.sqlite3
+      # 如果需要开发时热重载，可以挂载代码目录（可选）
+      # - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py collectstatic --noinput || true &&
+             exec gunicorn dji_command_root.wsgi:application --bind 0.0.0.0:8001 --workers 3 --timeout 120 --graceful-timeout 120 --access-logfile -"
+    restart: unless-stopped

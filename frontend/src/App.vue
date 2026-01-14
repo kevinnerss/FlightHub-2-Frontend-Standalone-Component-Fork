@@ -3,8 +3,8 @@
     <!-- 导航栏 - 高级科技风格 -->
     <div v-if="isAuthenticated" class="premium-nav-bar">
       <div class="nav-content">
-        <!-- Logo区域 -->
-        <div class="logo-section">
+        <!-- Logo区域（点击返回首页） -->
+        <router-link to="/main-view" class="logo-section logo-link">
           <div class="logo-icon">
             <img
                 src="@/assets/logo.png"
@@ -13,7 +13,7 @@
             />
           </div>
           <span class="logo-text">沈阳地铁低空智能巡检平台</span>
-        </div>
+        </router-link>
 
         <!-- 导航菜单 -->
         <nav class="nav-menu">
@@ -294,6 +294,11 @@ body {
   align-items: center;
   gap: 12px;
   flex-shrink: 0;
+}
+
+.logo-link {
+  text-decoration: none;
+  cursor: pointer;
 }
 
 .logo-icon {
