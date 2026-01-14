@@ -66,7 +66,7 @@ from .serializers import (
     WaylineImageSerializer, UserSerializer, UserCreateSerializer,
     LoginSerializer, TokenSerializer, ComponentConfigSerializer,
     MediaFolderConfigSerializer, InspectTaskSerializer, InspectImageSerializer,
-    DronePositionSerializer, DockStatusSerializer
+    DronePositionSerializer, DockStatusSerializer, FlightTaskInfoSerializer
 )
 
 from .filters import AlarmFilter, WaylineImageFilter
@@ -3377,6 +3377,37 @@ class FlightTaskProxyViewSet(viewsets.ViewSet):
             print(f"❌ [Proxy Error] Device command failed: {e}")
             return Response({"code": 500, "msg": str(e)}, status=500)
 
+
+
+class FlightTaskInfoViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    FlightTaskInfo read-only APIs.
+    """
+    queryset = FlightTaskInfo.objects.all().order_by("-created_at")
+    serializer_class = FlightTaskInfoSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    search_fields = ["sn", "name", "task_uuid"]
+    ordering_fields = ["created_at", "updated_at"]
+    ordering = ["-created_at"]
+    filterset_fields = {
+        "sn": ["exact", "icontains"],
+        "created_at": ["gte", "lte", "range"],
+    }
+
+    @action(detail=False, methods=["get"], url_path="latest-by-sn")
+    def latest_by_sn(self, request):
+        sn = request.query_params.get("sn")
+        if not sn:
+            return Response(
+                {"error": "sn parameter is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        task = FlightTaskInfo.objects.filter(sn=sn).order_by("-created_at").first()
+        if not task:
+            return Response({})
+        serializer = self.get_serializer(task)
+        return Response(serializer.data)
 
 
 class DronePositionViewSet(viewsets.ReadOnlyModelViewSet):

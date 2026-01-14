@@ -109,6 +109,10 @@ export default {
       type: String,
       default: 'drone03'
     },
+    streamUrlOverride: {
+      type: String,
+      default: ''
+    },
     // 流名称显示
     streamName: {
       type: String,
@@ -142,6 +146,7 @@ export default {
     // 🔥【关键修改】使用 .live.mp4 后缀，原生支持，无需插件
     streamUrl() {
       // 如果你想灵活传参，可以使用下面这行：
+      if (this.streamUrlOverride) return this.streamUrlOverride
       if (!this.streamId) return ''
       return `${this.zlmServer}/live/${this.streamId}.live.mp4`
 

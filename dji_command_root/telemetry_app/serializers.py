@@ -20,6 +20,7 @@ from .models import (
     InspectImage,
     DronePosition,
     DockStatus,
+    FlightTaskInfo,
 )
 
 
@@ -117,7 +118,7 @@ class AlarmSerializer(serializers.ModelSerializer):
         model = Alarm
         fields = [
             "id", "category", "category_details", "wayline", "wayline_details",
-            "latitude", "longitude", "content", "specific_data", "image_url",
+            "latitude", "longitude", "high", "content", "specific_data", "image_url",
             "image_signed_url", "status", "handler", "created_at", "updated_at",
         ]
         read_only_fields = ["created_at", "updated_at"]
@@ -454,6 +455,16 @@ class DronePositionSerializer(serializers.ModelSerializer):
 # ======================================================================
 # 🏭 机场名称全局映射字典
 # ======================================================================
+class FlightTaskInfoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FlightTaskInfo
+        fields = [
+            "id", "task_uuid", "name", "sn", "wayline_id",
+            "params", "status", "created_at", "updated_at"
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
 DOCK_NAME_MAPPING = {
     "8UUXN4900A052C": "工业大学机场",
     "8UUXN4R00A06Q6": "马贝机场",
@@ -487,6 +498,7 @@ class DockStatusSerializer(serializers.ModelSerializer):
             "electric_supply_voltage", "working_voltage", "working_current",
             "backup_battery_voltage", "backup_battery_temperature", "backup_battery_switch",
             "drone_in_dock", "drone_charge_state", "drone_battery_percent", "drone_sn",
+            "airport_push", "drone_push",
             "network_state_type", "network_quality", "network_rate",
             "storage_total", "storage_used", "storage_percent",
             "job_number", "acc_time", "activation_time",

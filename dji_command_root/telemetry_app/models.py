@@ -437,6 +437,8 @@ class DockStatus(models.Model):
     drone_charge_state = models.IntegerField(null=True, blank=True, verbose_name="无人机充电状态")
     drone_battery_percent = models.IntegerField(null=True, blank=True, verbose_name="无人机电量(%)")
     drone_sn = models.CharField(max_length=100, blank=True, null=True, verbose_name="机场内无人机SN")
+    airport_push = models.CharField(max_length=500, blank=True, null=True, verbose_name="机场推流地址")
+    drone_push = models.CharField(max_length=500, blank=True, null=True, verbose_name="无人机推流地址")
 
     # 网络状态
     network_state_type = models.IntegerField(null=True, blank=True, verbose_name="网络类型")

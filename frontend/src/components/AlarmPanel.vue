@@ -106,6 +106,7 @@ export default {
 <style scoped>
 .alarm-panel-premium {
   height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: rgba(26, 31, 58, 0.6);
@@ -197,6 +198,7 @@ export default {
 .alarm-list-container {
   flex: 1;
   overflow-y: auto;
+  min-height: 0;
   padding: 16px;
 }
 
