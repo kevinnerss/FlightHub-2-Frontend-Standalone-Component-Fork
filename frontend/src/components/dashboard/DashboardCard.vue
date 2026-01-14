@@ -1,37 +1,45 @@
 <template>
   <div class="dashboard-card">
     <div class="card-header">
-      <div class="header-left">
+      <div class="header-main">
         <span v-if="icon" class="card-icon" aria-hidden="true">{{ icon }}</span>
         <h3 class="card-title">{{ title }}</h3>
       </div>
+
       <router-link v-if="moreTo" :to="moreTo" class="more-btn">
-        <span>更多</span>
+        详情 <i class="arrow"></i>
       </router-link>
     </div>
 
     <div class="card-body">
-      <div v-if="loading" class="state-block">
-        <div class="loading-spinner"></div>
-        <div class="state-text">加载中...</div>
-      </div>
+      <div class="corner top-left"></div>
+      <div class="corner top-right"></div>
+      <div class="corner bottom-left"></div>
+      <div class="corner bottom-right"></div>
 
-      <div v-else-if="error" class="state-block error">
-        <div class="state-text">{{ error }}</div>
-      </div>
+      <div class="body-inner-container">
+        <div v-if="loading" class="state-block">
+          <div class="loading-spinner"></div>
+          <div class="state-text">加载中...</div>
+        </div>
 
-      <div v-else-if="isEmpty" class="state-block">
-        <div class="state-text">{{ emptyText }}</div>
-      </div>
+        <div v-else-if="error" class="state-block error">
+          <div class="state-text">{{ error }}</div>
+        </div>
 
-      <slot v-else />
+        <div v-else-if="isEmpty" class="state-block">
+          <div class="state-text">{{ emptyText }}</div>
+        </div>
+
+        <slot v-else />
+      </div>
     </div>
   </div>
 </template>
 
 <script>
 export default {
-  name: 'DashboardCard',
+  name: 'DashboardCard1',
   props: {
     title: { type: String, required: true },
     icon: { type: String, default: '' },
@@ -46,121 +54,156 @@ export default {
 
 <style scoped>
 .dashboard-card {
-  background: rgba(30, 41, 59, 0.45);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(0, 212, 255, 0.18);
-  border-radius: 16px;
-  overflow: hidden;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25), 0 0 40px rgba(0, 212, 255, 0.08);
+  background: rgba(10, 35, 65, 0.7);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 191, 255, 0.3);
+  box-shadow: 0 0 20px rgba(0, 140, 255, 0.2) inset;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+  height: 100%;
+  transition: all 0.3s ease;
 }
+
+.dashboard-card:hover {
+  border-color: rgba(0, 191, 255, 0.5);
+  box-shadow: 0 0 25px rgba(0, 140, 255, 0.3) inset;
+}
+
+.corner {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #00bfff;
+  z-index: 2;
+}
+.top-left { top: -1px; left: -1px; border-right: none; border-bottom: none; }
+.top-right { top: -1px; right: -1px; border-left: none; border-bottom: none; }
+.bottom-left { bottom: -1px; left: -1px; border-right: none; border-top: none; }
+.bottom-right { bottom: -1px; right: -1px; border-left: none; border-top: none; }
 
 .card-header {
-  padding: 14px 16px;
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  background: linear-gradient(
-    135deg,
-    rgba(0, 212, 255, 0.10) 0%,
-    rgba(0, 153, 255, 0.08) 100%
-  );
+  justify-content: center;
+  padding: 12px 16px;
+  background: linear-gradient(to bottom, rgba(0, 110, 255, 0.25), transparent);
+  border-bottom: 1px solid rgba(0, 191, 255, 0.15);
+  min-height: 48px;
 }
 
-.header-left {
+.header-main {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-width: 0;
+  gap: 8px;
+  max-width: 60%;
+}
+
+.more-btn {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+
+  background: rgba(0, 162, 255, 0.1);
+  border: 1px solid rgba(0, 191, 255, 0.6);
+  color: #aaddff;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  text-decoration: none;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.more-btn:hover {
+  background: rgba(0, 191, 255, 0.3);
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(0, 191, 255, 0.5);
 }
 
 .card-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 10px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #e0f2fe;
-  background: rgba(0, 212, 255, 0.12);
-  border: 1px solid rgba(0, 212, 255, 0.22);
-  box-shadow: 0 0 18px rgba(0, 212, 255, 0.15);
-  flex-shrink: 0;
+  font-size: 16px;
+  filter: drop-shadow(0 0 5px rgba(0, 191, 255, 0.8));
 }
 
 .card-title {
   margin: 0;
-  font-size: 14px;
-  font-weight: 700;
-  color: #e2e8f0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  text-shadow: 0 0 10px rgba(0, 191, 255, 0.8);
 }
 
-.more-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 10px;
-  border-radius: 10px;
-  background: rgba(0, 212, 255, 0.10);
-  border: 1px solid rgba(0, 212, 255, 0.22);
-  color: #7dd3fc;
-  font-size: 12px;
-  font-weight: 600;
-  text-decoration: none;
-  transition: all 0.2s ease;
-  flex-shrink: 0;
-}
-
-.more-btn:hover {
-  background: rgba(0, 212, 255, 0.18);
-  border-color: rgba(0, 212, 255, 0.42);
-  color: #e0f2fe;
-  transform: translateY(-1px);
-  box-shadow: 0 0 16px rgba(0, 212, 255, 0.18);
+.arrow {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-top: 1px solid #aaddff;
+  border-right: 1px solid #aaddff;
+  transform: rotate(45deg);
+  margin-left: 6px;
 }
 
 .card-body {
-  padding: 14px 16px 16px;
-  min-height: 120px;
+  flex: 1;
+  padding: 10px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.body-inner-container {
+  flex: 1;
+  border: 1px solid rgba(0, 191, 255, 0.15);
+  padding: 12px;
+  overflow-y: auto;
+  position: relative;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.body-inner-container::-webkit-scrollbar {
+  width: 4px;
+}
+.body-inner-container::-webkit-scrollbar-thumb {
+  background: rgba(0, 191, 255, 0.3);
+  border-radius: 2px;
 }
 
 .state-block {
-  min-height: 96px;
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  color: #cbd5e1;
+  gap: 12px;
+  color: #aaddff;
 }
 
 .state-block.error {
-  color: #fecaca;
-}
-
-.state-text {
-  font-size: 12px;
-  color: inherit;
-  opacity: 0.9;
-  text-align: center;
+  color: #ff6b6b;
 }
 
 .loading-spinner {
-  width: 22px;
-  height: 22px;
-  border: 3px solid rgba(0, 212, 255, 0.18);
-  border-top-color: rgba(0, 212, 255, 0.75);
-  border-radius: 999px;
-  animation: spin 0.9s linear infinite;
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgba(0, 191, 255, 0.2);
+  border-top-color: #00bfff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
 }
 
 @keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
+}
+
+.state-text {
+  font-size: 13px;
+  opacity: 0.8;
 }
 </style>

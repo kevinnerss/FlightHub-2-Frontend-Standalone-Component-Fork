@@ -12,18 +12,33 @@
           :is-empty="!dockSummary"
           empty-text="暂无机场信息"
         >
-          <div class="kpi-grid">
-            <div class="kpi">
-              <div class="kpi-label">机场总数</div>
-              <div class="kpi-value">{{ dockSummary.total }}</div>
-            </div>
-            <div class="kpi">
-              <div class="kpi-label">在线</div>
-              <div class="kpi-value good">{{ dockSummary.online }}</div>
-            </div>
-            <div class="kpi">
-              <div class="kpi-label">离线</div>
-              <div class="kpi-value warn">{{ dockSummary.offline }}</div>
+          <div class="dock-container">
+            <div v-for="(item, index) in docks" :key="index" class="dock-card">
+              <div class="dock-title">
+                <span class="status-dot" :class="{ online: item.link_status }"></span>
+                <span class="name-text">{{ item.dock_name }}</span>
+              </div>
+
+              <div class="info-list">
+                <div class="info-row">
+                  <span class="label">🌡️ 环境温度</span>
+                  <span class="value">{{ formatTemperature(item.environment_temperature) }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="label">💨 当前风速</span>
+                  <span class="value">{{ formatWindSpeed(item.wind_speed) }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="label">🚁 无人机状态</span>
+                  <span class="value" :class="{ 'highlight': !item.drone_in_dock }">
+            {{ getDroneInDockText(item.drone_in_dock) }}
+          </span>
+                </div>
+                <div class="info-row">
+                  <span class="label">🔋 剩余电量</span>
+                  <span class="value">{{ item.drone_battery || 0 }}%</span>
+                </div>
+              </div>
             </div>
           </div>
         </DashboardCard>
@@ -37,15 +52,17 @@
           :is-empty="recentAlarms.length === 0"
           empty-text="暂无告警"
         >
-          <div class="list">
-            <div v-for="item in recentAlarms" :key="item.id" class="list-row alarm-row">
-              <div class="row-main">
-                <div class="row-title">{{ item.content || '未填写描述' }}</div>
-                <div class="row-meta">
-                  <span class="pill" :class="statusPillClass(item.status)">{{ item.status || 'UNKNOWN' }}</span>
-                  <span class="sep">|</span>
-                  <span>{{ formatDateTime(item.created_at) }}</span>
-                </div>
+          <div class="table-container">
+            <div class="table-header">
+              <span class="th-box">类型</span>
+              <span class="th-box">描述</span>
+              <span class="th-box">时间</span>
+            </div>
+            <div class="table-content">
+              <div v-for="(item, index) in recentAlarms" :key="index" class="table-row">
+                <span class="col">{{ item.category_name }}</span>
+                <span class="col">{{ item.content }}</span>
+                <span class="col">{{ formatDateTime(item.created_at) }}</span>
               </div>
             </div>
           </div>
@@ -180,17 +197,19 @@
           :is-empty="recentTasks.length === 0"
           empty-text="暂无任务"
         >
-          <div class="list">
-            <div v-for="t in recentTasks" :key="t.id" class="list-row task-row">
-              <div class="row-main">
-                <div class="row-title">{{ t.external_task_id || t.dji_task_name || `任务 ${t.id}` }}</div>
-                <div class="row-meta">
-                  <span class="pill task">{{ t.detect_status || 'unknown' }}</span>
-                  <span class="sep">|</span>
-                  <span>{{ formatDateTime(t.created_at) }}</span>
-                  <span v-if="t.alarm_count !== undefined" class="sep">|</span>
-                  <span v-if="t.alarm_count !== undefined">异常 {{ t.alarm_count }}</span>
-                </div>
+          <div class="table-container">
+            <div class="table-header">
+              <span class="th-box">巡检类型</span>
+              <span class="th-box">巡检状态</span>
+              <span class="th-box">巡检时间</span>
+            </div>
+            <div class="table-content">
+              <div v-for="t in recentTasks" :key="t.id" class="table-row">
+                <span class="col">{{ t.detect_category_name || "--" }}</span>
+                <span class="col">
+                  <span class="pill">{{ t.detect_status }}</span>
+                </span>
+                <span class="col">{{ formatDateTime(t.created_at) }}</span>
               </div>
             </div>
           </div>
@@ -206,20 +225,17 @@
           empty-text="暂无人员信息"
         >
           <div class="personnel">
-            <div class="personnel-head">
-              <span class="personnel-tag">{{ personnel.isAdmin ? '管理员视角' : '当前用户' }}</span>
-              <span class="personnel-total">总计 {{ personnel.total }}</span>
-            </div>
-            <div class="list">
-              <div v-for="u in personnel.users" :key="u.id || u.username" class="list-row user-row">
-                <div class="avatar">{{ getAvatarText(u) }}</div>
-                <div class="row-main">
-                  <div class="row-title">{{ u.name || u.username || `用户 ${u.id}` }}</div>
-                  <div class="row-meta">
-                    <span class="pill user">{{ u.role || 'user' }}</span>
-                    <span v-if="u.email" class="sep">|</span>
-                    <span v-if="u.email">{{ u.email }}</span>
-                  </div>
+            <div class="table-container">
+              <div class="table-header">
+                <span class="th-box">用户名</span>
+                <span class="th-box">姓名</span>
+                <span class="th-box">角色</span>
+              </div>
+              <div class="table-content">
+                <div v-for="u in personnel.users" :key="u.id || u.username" class="table-row">
+                  <span class="col">{{ u.username }}</span>
+                  <span class="col">{{ u.name }}</span>
+                  <span class="col">{{ u.role }}</span>
                 </div>
               </div>
             </div>
@@ -235,6 +251,7 @@ import DashboardCard from '@/components/dashboard/DashboardCard.vue'
 import MapPlaceholder from '@/components/dashboard/MapPlaceholder.vue'
 import DonutRing from '@/components/dashboard/DonutRing.vue'
 import homeDashboardApi from '@/api/homeDashboardApi'
+import dockStatusApi from "@/api/dockStatusApi";
 
 export default {
   name: 'MainView',
@@ -272,6 +289,7 @@ export default {
         safety: ''
       },
       dockSummary: null,
+      docks: [],
       recentAlarms: [],
       alertWaylineStats: null,
       aiSlides: [],
@@ -281,7 +299,7 @@ export default {
       personnel: { isAdmin: false, total: 0, users: [] },
       safetyStats: { safetyDays: 0, todayAlarms: 0, monthAlarms: 0, yearAlarms: 0, latestAlarmAt: null },
       nowStampTimer: null,
-      nowStamp: ''
+      nowStamp: '',
     }
   },
   computed: {
@@ -302,7 +320,10 @@ export default {
   },
   mounted() {
     this.updateNowStamp()
-    this.nowStampTimer = setInterval(() => this.updateNowStamp(), 1000 * 10)
+    this.nowStampTimer = setInterval(() => {
+      this.updateNowStamp()
+      this.loadDock()
+    }, 1000 * 10)
     this.loadAll()
   },
   beforeUnmount() {
@@ -330,6 +351,7 @@ export default {
       this.errors.dock = ''
       try {
         this.dockSummary = await homeDashboardApi.getDockSummary()
+        this.docks = await dockStatusApi.getAllDocks()
       } catch (e) {
         this.dockSummary = null
         this.errors.dock = this.getErrMsg(e, '加载机场信息失败')
@@ -341,7 +363,11 @@ export default {
       this.loading.alarms = true
       this.errors.alarms = ''
       try {
-        this.recentAlarms = await homeDashboardApi.getRecentAlarms(5)
+        const list = await homeDashboardApi.getRecentAlarms(5)
+        this.recentAlarms = list.map(item => ({
+          ...item,
+          category_name: item.category_details?.name || item.category_name || '未分类'
+        }))
       } catch (e) {
         this.recentAlarms = []
         this.errors.alarms = this.getErrMsg(e, '加载告警列表失败')
@@ -380,6 +406,7 @@ export default {
       this.errors.tasks = ''
       try {
         this.recentTasks = await homeDashboardApi.getRecentInspectTasks(5)
+        console.log(this.recentTasks)
       } catch (e) {
         this.recentTasks = []
         this.errors.tasks = this.getErrMsg(e, '加载巡检任务失败')
@@ -410,6 +437,20 @@ export default {
       } finally {
         this.loading.safety = false
       }
+    },
+    formatTemperature(temp) {
+      return temp !== null && temp !== undefined ? `${temp}℃` : '--'
+    },
+    formatWindSpeed(speed) {
+      return speed !== null && speed !== undefined ? `${speed} m/s` : '--'
+    },
+    getDroneInDockText(state) {
+      const stateMap = {
+        0: '不在舱内',
+        1: '在舱内',
+        null: '--'
+      }
+      return stateMap[state] || '未知'
     },
     goStart() {
       this.$router.push('/')
@@ -484,17 +525,22 @@ export default {
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: 1fr 3fr 1fr;
+  grid-template-columns: minmax(280px, 1fr) 3fr minmax(280px, 1fr);
   gap: 18px;
-  flex: 1; /* 撑开垂直空间 */
-  min-height: 0; /* 必须设置以允许内部滚动/压缩 */
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  table-layout: fixed;
 }
 
 .side-panel {
   display: grid;
-  grid-template-rows: repeat(3, 1fr); /* 3行等高 */
+  grid-template-rows: repeat(3, 1fr);
   gap: 18px;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
 }
 
 /* 让侧边栏的所有卡片充满网格 */
@@ -963,6 +1009,7 @@ export default {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  width: 100%;
 }
 
 .ai-slide {
@@ -976,15 +1023,16 @@ export default {
   height: 150px;
   border-radius: 12px;
   overflow: hidden;
-  border: 1px solid rgba(0, 212, 255, 0.18);
-  background: rgba(11, 16, 36, 0.55);
+  position: relative;
 }
 
 .ai-image img {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  display: block;
 }
 
 .ai-meta {
@@ -1107,6 +1155,161 @@ export default {
   .map-card {
     min-height: 420px;
   }
+}
+
+.table-container {
+  color: #fff;
+  overflow: hidden
+}
+
+.table-header {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 15px;
+  color: #ffffff;
+  font-size: 14px;
+}
+
+.th-box {
+  flex: 1;
+  background: linear-gradient(
+      to bottom,
+      rgba(0, 162, 255, 0.3) 0%,
+      rgba(0, 80, 180, 0.1) 100%
+  );
+  border: 1px solid rgba(0, 191, 255, 0.6);
+  box-shadow: inset 0 0 8px rgba(0, 191, 255, 0.3);
+  color: #aaddff;
+  text-align: center;
+  padding: 5px 0;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.table-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 10px;
+  font-size: 16px;
+  transition: all 0.3s;
+  align-items: center;
+}
+
+.table-row:hover {
+  background: rgba(0, 191, 255, 0.1);
+}
+
+.col {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 14px;
+}
+
+.table-header, .table-row {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.th-box, .col {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  text-align: center;
+}
+
+.pill {
+  display: inline-block;
+  padding: 2px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #a5f3fc;
+  background: linear-gradient(180deg, rgba(34, 211, 238, 0.15) 0%, rgba(34, 211, 238, 0.05) 100%);
+  border: 1px solid rgba(34, 211, 238, 0.4);
+  border-radius: 4px;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.1);
+  min-width: 70px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.dock-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dock-card {
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(0, 191, 255, 0.15);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.dock-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-weight: bold;
+  color: #e0f2fe;
+  font-size: 14px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #64748b;
+}
+.status-dot.online {
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
+}
+
+.info-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+  padding-top: 4px;
+}
+
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-width: 0;
+}
+
+.info-row .label {
+  font-size: 12px;
+  color: #94a3b8;
+  white-space: nowrap;
+  margin-right: 4px;
+}
+
+.info-row .value {
+  font-size: 13px;
+  color: #f1f5f9;
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dock-card {
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid rgba(0, 191, 255, 0.15);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.highlight {
+  color: #fbbf24 !important;
 }
 </style>
 
