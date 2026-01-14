@@ -1,7 +1,6 @@
 <template>
   <div class="home-dashboard">
     <div class="dashboard-grid">
-      <!-- 左侧 3 卡 -->
       <aside class="side-panel">
         <DashboardCard
           title="机场信息"
@@ -18,7 +17,6 @@
                 <span class="status-dot" :class="{ online: item.link_status }"></span>
                 <span class="name-text">{{ item.dock_name }}</span>
               </div>
-
               <div class="info-list">
                 <div class="info-row">
                   <span class="label">🌡️ 环境温度</span>
@@ -31,8 +29,8 @@
                 <div class="info-row">
                   <span class="label">🚁 无人机状态</span>
                   <span class="value" :class="{ 'highlight': !item.drone_in_dock }">
-            {{ getDroneInDockText(item.drone_in_dock) }}
-          </span>
+                    {{ getDroneInDockText(item.drone_in_dock) }}
+                  </span>
                 </div>
                 <div class="info-row">
                   <span class="label">🔋 剩余电量</span>
@@ -52,7 +50,7 @@
           :is-empty="recentAlarms.length === 0"
           empty-text="暂无告警"
         >
-          <div class="table-container">
+           <div class="table-container">
             <div class="table-header">
               <span class="th-box">类型</span>
               <span class="th-box">描述</span>
@@ -82,14 +80,12 @@
               <span class="stats-label">近12个月告警</span>
               <span class="stats-value">{{ (alertWaylineStats && alertWaylineStats.total) || 0 }}</span>
             </div>
-
             <div v-if="alertWaylineStats && alertWaylineStats.total > 0" class="donut-mini-content">
               <DonutRing
                 :series="alertWaylineStats.series"
                 total-label="总异常"
                 :total-value="alertWaylineStats.total"
               />
-
               <div class="donut-mini-legend">
                 <div v-for="item in alertWaylineStats.series" :key="item.id" class="legend-item">
                   <span class="legend-dot" :style="{ background: item.color }"></span>
@@ -104,12 +100,11 @@
         </DashboardCard>
       </aside>
 
-      <!-- 中部：地图 + 启动检测 + 底部模块 -->
       <section class="center-stage">
         <div class="map-card-wrapper">
-          <MapPlaceholder label="核心地图" />
           
-          <!-- 按钮内嵌到地图区域内部下方 -->
+          <div id="cesiumContainer" ref="cesiumContainer" class="cesium-full-screen"></div>
+          
           <button class="start-btn-inline" @click="goStart">
             <span class="start-btn-text">启动检测</span>
             <span class="start-btn-sub">进入智能主控台</span>
@@ -158,7 +153,6 @@
         </div>
       </section>
 
-      <!-- 右侧 3 卡 -->
       <aside class="side-panel">
         <DashboardCard
           title="AI检测"
@@ -224,7 +218,7 @@
           :is-empty="personnel.users.length === 0"
           empty-text="暂无人员信息"
         >
-          <div class="personnel">
+           <div class="personnel">
             <div class="table-container">
               <div class="table-header">
                 <span class="th-box">用户名</span>
@@ -248,16 +242,17 @@
 
 <script>
 import DashboardCard from '@/components/dashboard/DashboardCard.vue'
-import MapPlaceholder from '@/components/dashboard/MapPlaceholder.vue'
 import DonutRing from '@/components/dashboard/DonutRing.vue'
 import homeDashboardApi from '@/api/homeDashboardApi'
 import dockStatusApi from "@/api/dockStatusApi";
+
+// 🔥 1. 引入 Cesium
+import * as Cesium from 'cesium';
 
 export default {
   name: 'MainView',
   components: {
     DashboardCard,
-    MapPlaceholder,
     DonutRing
   },
   data() {
@@ -300,6 +295,9 @@ export default {
       safetyStats: { safetyDays: 0, todayAlarms: 0, monthAlarms: 0, yearAlarms: 0, latestAlarmAt: null },
       nowStampTimer: null,
       nowStamp: '',
+      
+      // 🔥 Cesium 实例
+      cesiumViewer: null
     }
   },
   computed: {
@@ -325,6 +323,11 @@ export default {
       this.loadDock()
     }, 1000 * 10)
     this.loadAll()
+    
+    // 🔥 2. 初始化地图 (确保 DOM 已渲染)
+    this.$nextTick(() => {
+      this.initCesiumMap();
+    });
   },
   beforeUnmount() {
     this.stopAiAuto()
@@ -332,8 +335,101 @@ export default {
       clearInterval(this.nowStampTimer)
       this.nowStampTimer = null
     }
+    // 🔥 3. 销毁地图，防止内存泄漏
+    if (this.cesiumViewer && !this.cesiumViewer.isDestroyed()) {
+      this.cesiumViewer.destroy();
+      this.cesiumViewer = null;
+    }
   },
   methods: {
+    // 🔥 4. 核心地图初始化方法
+initCesiumMap() {
+  console.log('>>> [调试] 开始初始化地图...');
+  
+  const container = this.$refs.cesiumContainer;
+  if (!container) {
+    console.error('>>> [错误] 找不到 DOM 容器 cesiumContainer');
+    return;
+  }
+
+  // 1. 获取正确的 IP
+  const hostname = window.location.hostname;
+  // 2. 拼接地址 (请确认你的 style 名字是不是 basic-preview)
+  const tileUrl = `http://${hostname}:7777/data/shenyang3/{z}/{x}/{y}.png`;
+  
+  console.log('>>> [调试] 地图服务地址:', tileUrl);
+
+  try {
+    this.cesiumViewer = new Cesium.Viewer(container, {
+      animation: false,
+      baseLayerPicker: false,
+      fullscreenButton: false,
+      geocoder: false,
+      homeButton: false,
+      infoBox: false,
+      sceneModePicker: false,
+      selectionIndicator: false,
+      timeline: false,
+      navigationHelpButton: false,
+      sceneMode: Cesium.SceneMode.SCENE3D,
+      imageryProvider: false, // 先关掉默认的，后面再加
+      contextOptions: {
+        webgl: {
+          alpha: true
+        }
+      }
+    });
+
+    this.tuneCameraControls(this.cesiumViewer.scene.screenSpaceCameraController);
+    
+    console.log('>>> [调试] Viewer 创建成功');
+    
+    // 强制显示地球
+    this.cesiumViewer.scene.globe.show = true;
+    this.cesiumViewer.scene.globe.baseColor = Cesium.Color.BLUE; // 给个蓝色底，证明 Cesium 活着
+
+    // 加载图层
+    const layer = new Cesium.UrlTemplateImageryProvider({
+      url: tileUrl,
+      maximumLevel: 18
+    });
+
+    // 监听错误
+    layer.errorEvent.addEventListener((event) => {
+      console.error('>>> [错误] 图层加载失败:', event);
+    });
+
+    this.cesiumViewer.imageryLayers.addImageryProvider(layer);
+    console.log('>>> [调试] 图层已添加');
+
+    // 飞过去
+    const target = this.tileToLonLat(13, 6899, 3050);
+    this.cesiumViewer.camera.setView({
+        destination: Cesium.Cartesian3.fromDegrees(target.lon, target.lat, 8000),
+        orientation: {
+          heading: 0,
+          pitch: Cesium.Math.toRadians(-90),
+          roll: 0
+        }
+    });
+    
+  } catch (e) {
+    console.error('>>> [错误] Cesium 初始化崩溃:', e);
+  }
+},
+    // --- 其他原有方法 ---
+    tuneCameraControls(controller) {
+      if (!controller) return
+      if (typeof controller.zoomFactor === 'number') {
+        controller.zoomFactor = 0.4
+      }
+      if (typeof controller._zoomFactor === 'number') {
+        controller._zoomFactor = 0.4
+      }
+      if (typeof controller.minimumZoomRate === 'number') {
+        controller.minimumZoomRate = 0.05
+      }
+    },
     async loadAll() {
       await Promise.all([
         this.loadDock(),
@@ -406,7 +502,6 @@ export default {
       this.errors.tasks = ''
       try {
         this.recentTasks = await homeDashboardApi.getRecentInspectTasks(5)
-        console.log(this.recentTasks)
       } catch (e) {
         this.recentTasks = []
         this.errors.tasks = this.getErrMsg(e, '加载巡检任务失败')
@@ -440,6 +535,13 @@ export default {
     },
     formatTemperature(temp) {
       return temp !== null && temp !== undefined ? `${temp}℃` : '--'
+    },
+    tileToLonLat(z, x, y) {
+      const n = Math.pow(2, z)
+      const lon = ((x + 0.5) / n) * 360 - 180
+      const latRad = Math.atan(Math.sinh(Math.PI * (1 - (2 * (y + 0.5)) / n)))
+      const lat = (latRad * 180) / Math.PI
+      return { lon, lat }
     },
     formatWindSpeed(speed) {
       return speed !== null && speed !== undefined ? `${speed} m/s` : '--'
@@ -484,22 +586,11 @@ export default {
       return Math.round((Number(value || 0) / total) * 100)
     },
     handleAiImgError(event) {
-      // 发生错误时隐藏该图片，避免显示破图；不替换为假图片
       try {
         event.target.style.display = 'none'
       } catch (e) {
         // ignore
       }
-    },
-    statusPillClass(status) {
-      if (status === 'PENDING') return 'danger'
-      if (status === 'PROCESSING') return 'warn'
-      if (status === 'COMPLETED') return 'good'
-      return 'info'
-    },
-    getAvatarText(u) {
-      const name = u?.name || u?.username || ''
-      return name ? String(name).trim().charAt(0).toUpperCase() : 'U'
     },
     getErrMsg(err, fallback) {
       const msg = err?.response?.data?.detail || err?.message
@@ -516,9 +607,11 @@ export default {
 </script>
 
 <style scoped>
+/* 保持原有的大部分样式，只修改地图相关部分 */
+
 .home-dashboard {
   width: 100%;
-  height: calc(100vh - 110px); /* 减去顶部导航高度 */
+  height: calc(100vh - 110px);
   display: flex;
   flex-direction: column;
 }
@@ -543,7 +636,6 @@ export default {
   overflow: hidden;
 }
 
-/* 让侧边栏的所有卡片充满网格 */
 .side-panel :deep(.dashboard-card) {
   height: 100%;
   display: flex;
@@ -551,7 +643,6 @@ export default {
   min-height: 0;
 }
 
-/* 覆盖卡片内部 body 布局 */
 .side-panel :deep(.card-body) {
   flex: 1;
   overflow-y: auto;
@@ -559,16 +650,45 @@ export default {
 
 .center-stage {
   display: grid;
-  grid-template-rows: repeat(3, 1fr); /* 同样采用3行等高 */
+  grid-template-rows: repeat(3, 1fr);
   gap: 18px;
   min-height: 0;
+  height: 100%;
 }
 
+/* 🔥 地图区域样式修正 */
 .map-card-wrapper {
-  grid-row: span 2; /* 地图占据前2行 */
+  grid-row: span 2;
   position: relative;
   border-radius: 18px;
   overflow: hidden;
+  min-height: 0;
+  background: #0b1024; /* 兜底深色背景 */
+}
+
+/* Cesium 容器全屏铺满 */
+.cesium-full-screen {
+  width: 100%;
+  height: 100%;
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+/* 强制覆盖 Cesium 样式，防止溢出 */
+:deep(.cesium-viewer),
+:deep(.cesium-viewer-cesiumWidgetContainer),
+:deep(.cesium-widget),
+:deep(.cesium-widget canvas) {
+  width: 100% !important;
+  height: 100% !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
 }
 
 .start-btn-inline {
@@ -577,7 +697,7 @@ export default {
   left: 50%;
   transform: translateX(-50%);
   width: 420px;
-  z-index: 10;
+  z-index: 10; /* 确保在地图上方 */
   padding: 16px 24px;
   border-radius: 12px;
   border: 1px solid rgba(0, 212, 255, 0.4);
@@ -613,13 +733,13 @@ export default {
   opacity: 0.8;
 }
 
+/* --- 下面保持原样 --- */
 .bottom-media {
-  grid-row: span 1; /* 占据最后1行，高度与侧边栏底部的卡片完全一致 */
+  grid-row: span 1;
   display: grid;
-  grid-template-columns: 1fr 1fr; /* 等宽 50% */
+  grid-template-columns: 1fr 1fr;
   gap: 18px;
 }
-
 .glass-card {
   background: rgba(30, 41, 59, 0.45);
   backdrop-filter: blur(12px);
@@ -628,12 +748,10 @@ export default {
   overflow: hidden;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
 }
-
 .hero-card {
   position: relative;
   background: linear-gradient(135deg, rgba(12, 74, 110, 0.85), rgba(30, 64, 175, 0.85));
 }
-
 .hero-overlay {
   position: absolute;
   inset: 0;
@@ -643,7 +761,6 @@ export default {
   filter: blur(10px);
   opacity: 0.8;
 }
-
 .hero-content {
   position: relative;
   padding: 18px 18px;
@@ -652,33 +769,28 @@ export default {
   gap: 12px;
   z-index: 1;
 }
-
 .hero-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
 }
-
 .hero-label {
   margin: 0;
   color: #cbd5e1;
   font-size: 13px;
   letter-spacing: 1px;
 }
-
 .hero-number {
   font-size: 44px;
   font-weight: 900;
   color: #e0f2fe;
   text-shadow: 0 0 16px rgba(14, 165, 233, 0.7);
 }
-
 .hero-unit {
   font-size: 14px;
   color: #bae6fd;
   margin-left: 6px;
 }
-
 .hero-tag {
   padding: 8px 12px;
   background: rgba(59, 130, 246, 0.2);
@@ -687,13 +799,11 @@ export default {
   color: #e0f2fe;
   font-size: 12px;
 }
-
 .hero-summary {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
 }
-
 .summary-chip {
   display: inline-flex;
   align-items: center;
@@ -704,23 +814,19 @@ export default {
   border-radius: 12px;
   color: #cbd5e1;
 }
-
 .chip-dot {
   width: 10px;
   height: 10px;
   border-radius: 999px;
 }
-
 .chip-label {
   font-size: 12px;
 }
-
 .chip-value {
   font-size: 14px;
   font-weight: 800;
   color: #e2e8f0;
 }
-
 .hero-foot {
   display: flex;
   justify-content: space-between;
@@ -729,38 +835,32 @@ export default {
   padding-top: 4px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
-
 .foot-label {
   color: #cbd5e1;
   font-size: 12px;
   opacity: 0.9;
 }
-
 .foot-value {
   color: #e0f2fe;
   font-size: 12px;
   font-weight: 700;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
 }
-
 .card-header-lite {
   padding: 14px 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
-
 .card-header-lite h3 {
   margin: 0;
   font-size: 14px;
   font-weight: 800;
   color: #e0f2fe;
 }
-
 .playback-card {
   background: rgba(15, 23, 42, 0.8);
   display: flex;
   flex-direction: column;
 }
-
 .playback-content {
   flex: 1;
   display: flex;
@@ -769,13 +869,11 @@ export default {
   align-items: center;
   gap: 12px;
 }
-
 .playback-ui {
   display: flex;
   align-items: center;
   gap: 25px;
 }
-
 .btn-play-large {
   width: 50px;
   height: 50px;
@@ -786,148 +884,35 @@ export default {
   transition: all 0.3s;
   box-shadow: 0 0 15px rgba(56, 189, 248, 0.2);
 }
-
 .btn-play-large:hover {
   background: #38bdf8;
   box-shadow: 0 0 25px rgba(56, 189, 248, 0.5);
   transform: scale(1.08);
 }
-
 .time-stamp-v2 {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
   color: #94a3b8;
   font-size: 12px;
 }
-
-.kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.kpi {
-  padding: 12px;
-  background: rgba(15, 23, 42, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-}
-
-.kpi-label {
-  color: #94a3b8;
-  font-size: 12px;
-  margin-bottom: 6px;
-}
-
-.kpi-value {
-  font-size: 20px;
-  font-weight: 900;
-  color: #e0f2fe;
-}
-
-.kpi-value.good {
-  color: #86efac;
-}
-
-.kpi-value.warn {
-  color: #fbbf24;
-}
-
-.list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.list-row {
-  display: flex;
-  gap: 10px;
-  padding: 10px 12px;
-  background: rgba(15, 23, 42, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-}
-
-.row-main {
-  min-width: 0;
-  flex: 1;
-}
-
-.row-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: #e2e8f0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.row-meta {
-  margin-top: 6px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #94a3b8;
-  font-size: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-.sep {
-  color: rgba(148, 163, 184, 0.55);
-}
-
 .pill {
-  padding: 4px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
-  color: #cbd5e1;
-}
-
-.pill.danger {
-  border-color: rgba(239, 68, 68, 0.45);
-  background: rgba(239, 68, 68, 0.12);
-  color: #fecaca;
-}
-
-.pill.warn {
-  border-color: rgba(245, 158, 11, 0.45);
-  background: rgba(245, 158, 11, 0.12);
-  color: #fde68a;
-}
-
-.pill.good {
-  border-color: rgba(34, 197, 94, 0.45);
-  background: rgba(34, 197, 94, 0.12);
-  color: #bbf7d0;
-}
-
-.pill.info {
-  border-color: rgba(56, 189, 248, 0.45);
-  background: rgba(56, 189, 248, 0.12);
-  color: #bae6fd;
-}
-
-.pill.task {
-  border-color: rgba(59, 130, 246, 0.35);
-  background: rgba(59, 130, 246, 0.10);
-  color: #bfdbfe;
-}
-
-.pill.user {
-  border-color: rgba(34, 211, 238, 0.35);
-  background: rgba(34, 211, 238, 0.10);
+  display: inline-block;
+  padding: 2px 12px;
+  font-size: 12px;
+  font-weight: 500;
   color: #a5f3fc;
+  background: linear-gradient(180deg, rgba(34, 211, 238, 0.15) 0%, rgba(34, 211, 238, 0.05) 100%);
+  border: 1px solid rgba(34, 211, 238, 0.4);
+  border-radius: 4px;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.1);
+  min-width: 70px;
+  text-align: center;
+  white-space: nowrap;
 }
-
 .stats-wrap {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
-
 .stats-total {
   display: flex;
   align-items: baseline;
@@ -938,24 +923,20 @@ export default {
   background: rgba(15, 23, 42, 0.35);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
-
 .stats-label {
   color: #94a3b8;
   font-size: 12px;
 }
-
 .stats-value {
   color: #e0f2fe;
   font-weight: 900;
   font-size: 22px;
 }
-
 .donut-mini-content {
   display: flex;
   gap: 12px;
   align-items: center;
 }
-
 .donut-mini-legend {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -963,7 +944,6 @@ export default {
   width: 100%;
   align-items: start;
 }
-
 .legend-item {
   display: flex;
   align-items: center;
@@ -973,14 +953,12 @@ export default {
   border-radius: 12px;
   padding: 8px 10px;
 }
-
 .legend-dot {
   width: 10px;
   height: 10px;
   border-radius: 999px;
   flex-shrink: 0;
 }
-
 .legend-text {
   display: flex;
   justify-content: space-between;
@@ -989,7 +967,6 @@ export default {
   color: #cbd5e1;
   font-size: 12px;
 }
-
 .legend-name {
   flex: 1;
   min-width: 0;
@@ -998,26 +975,22 @@ export default {
   white-space: nowrap;
   font-weight: 700;
 }
-
 .legend-value {
   color: #e0f2fe;
   font-weight: 900;
   flex-shrink: 0;
 }
-
 .ai-card {
   display: flex;
   flex-direction: column;
   gap: 10px;
   width: 100%;
 }
-
 .ai-slide {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
-
 .ai-image {
   width: 100%;
   height: 150px;
@@ -1025,7 +998,6 @@ export default {
   overflow: hidden;
   position: relative;
 }
-
 .ai-image img {
   position: absolute;
   top: 0;
@@ -1034,13 +1006,11 @@ export default {
   height: 100%;
   object-fit: cover;
 }
-
 .ai-meta {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
-
 .ai-title {
   color: #e2e8f0;
   font-weight: 800;
@@ -1049,12 +1019,10 @@ export default {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
 .ai-sub {
   color: #94a3b8;
   font-size: 12px;
 }
-
 .ai-controls {
   display: flex;
   justify-content: space-between;
@@ -1063,7 +1031,6 @@ export default {
   padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
-
 .ai-btn {
   padding: 8px 12px;
   border-radius: 10px;
@@ -1073,23 +1040,19 @@ export default {
   cursor: pointer;
   transition: all 0.2s ease;
 }
-
 .ai-btn.ghost {
   background: rgba(0, 212, 255, 0.08);
   border-color: rgba(0, 212, 255, 0.20);
 }
-
 .ai-btn:hover {
   color: #7dd3fc;
   border-color: rgba(0, 212, 255, 0.45);
 }
-
 .ai-count {
   color: #e0f2fe;
   font-size: 12px;
   font-weight: 800;
 }
-
 .ai-empty {
   padding: 18px 10px;
   text-align: center;
@@ -1099,69 +1062,10 @@ export default {
   border-radius: 12px;
   background: rgba(15, 23, 42, 0.25);
 }
-
-.personnel-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.personnel-tag {
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(34, 211, 238, 0.35);
-  background: rgba(34, 211, 238, 0.10);
-  color: #a5f3fc;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.personnel-total {
-  color: #94a3b8;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.avatar {
-  width: 34px;
-  height: 34px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #00d4ff 0%, #0099ff 100%);
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 900;
-  flex-shrink: 0;
-  box-shadow: 0 6px 18px rgba(0, 212, 255, 0.20);
-}
-
-@media (max-width: 1280px) {
-  .dashboard-grid {
-    grid-template-columns: 1fr 3fr 1fr;
-  }
-}
-
-@media (max-width: 1120px) {
-  .dashboard-grid {
-    grid-template-columns: 1fr;
-  }
-  .bottom-media {
-    grid-template-columns: 1fr;
-    height: auto;
-  }
-  .map-card {
-    min-height: 420px;
-  }
-}
-
 .table-container {
   color: #fff;
-  overflow: hidden
+  overflow: hidden;
 }
-
 .table-header {
   display: flex;
   gap: 12px;
@@ -1169,7 +1073,6 @@ export default {
   color: #ffffff;
   font-size: 14px;
 }
-
 .th-box {
   flex: 1;
   background: linear-gradient(
@@ -1185,7 +1088,6 @@ export default {
   font-size: 12px;
   font-weight: bold;
 }
-
 .table-row {
   display: flex;
   gap: 12px;
@@ -1194,60 +1096,38 @@ export default {
   transition: all 0.3s;
   align-items: center;
 }
-
 .table-row:hover {
   background: rgba(0, 191, 255, 0.1);
 }
-
 .col {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 14px;
 }
-
 .table-header, .table-row {
   display: flex;
   gap: 12px;
   width: 100%;
   table-layout: fixed;
 }
-
 .th-box, .col {
   flex: 1;
   width: 0;
   min-width: 0;
   text-align: center;
 }
-
-.pill {
-  display: inline-block;
-  padding: 2px 12px;
-  font-size: 12px;
-  font-weight: 500;
-  color: #a5f3fc;
-  background: linear-gradient(180deg, rgba(34, 211, 238, 0.15) 0%, rgba(34, 211, 238, 0.05) 100%);
-  border: 1px solid rgba(34, 211, 238, 0.4);
-  border-radius: 4px;
-  box-shadow: 0 0 8px rgba(34, 211, 238, 0.1);
-  min-width: 70px;
-  text-align: center;
-  white-space: nowrap;
-}
-
 .dock-container {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
-
 .dock-card {
   background: rgba(15, 23, 42, 0.4);
   border: 1px solid rgba(0, 191, 255, 0.15);
   border-radius: 8px;
   padding: 12px;
 }
-
 .dock-title {
   display: flex;
   align-items: center;
@@ -1257,7 +1137,6 @@ export default {
   color: #e0f2fe;
   font-size: 14px;
 }
-
 .status-dot {
   width: 8px;
   height: 8px;
@@ -1268,29 +1147,24 @@ export default {
   background: #22c55e;
   box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
 }
-
 .info-list {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px 16px;
   padding-top: 4px;
 }
-
-
 .info-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   min-width: 0;
 }
-
 .info-row .label {
   font-size: 12px;
   color: #94a3b8;
   white-space: nowrap;
   margin-right: 4px;
 }
-
 .info-row .value {
   font-size: 13px;
   color: #f1f5f9;
@@ -1300,16 +1174,22 @@ export default {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-.dock-card {
-  background: rgba(15, 23, 42, 0.4);
-  border: 1px solid rgba(0, 191, 255, 0.15);
-  border-radius: 8px;
-  padding: 12px;
-}
-
 .highlight {
   color: #fbbf24 !important;
 }
-</style>
 
+@media (max-width: 1280px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr 3fr 1fr;
+  }
+}
+@media (max-width: 1120px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+  .bottom-media {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+}
+</style>
