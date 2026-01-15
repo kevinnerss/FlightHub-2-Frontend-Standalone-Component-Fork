@@ -515,14 +515,27 @@ export default {
 
         try {
           this.tileset = await Cesium.Cesium3DTileset.fromUrl('/models/site_model/3dtiles/tileset.json')
+          // 修改为指向刚才启动的本地服务地址
+// 注意：因为服务是在 "3dtiles" 文件夹里启动的，所以直接访问 /tileset.json 即可
+//           this.tileset = await Cesium.Cesium3DTileset.fromUrl('http://localhost:8081/tileset.json')
           this.viewer.scene.primitives.add(this.tileset)
           await this.tileset.readyPromise
-          await this.viewer.zoomTo(this.tileset, new Cesium.HeadingPitchRange(
-              0,
-              Cesium.Math.toRadians(-30),
-              this.tileset.boundingSphere.radius * 2.5
-          ))
-          this.viewer.resize()
+
+          const heightOffset = -40.2;
+
+          const boundingSphere = this.tileset.boundingSphere
+          const cartographic = Cesium.Cartographic.fromCartesian(boundingSphere.center)
+
+          const surface = Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, 0.0)
+          const offset = Cesium.Cartesian3.fromRadians(cartographic.longitude, cartographic.latitude, heightOffset)
+          const translation = Cesium.Cartesian3.subtract(offset, surface, new Cesium.Cartesian3())
+
+          this.tileset.modelMatrix = Cesium.Matrix4.fromTranslation(translation)
+// 飞向模型
+          this.viewer.flyTo(this.tileset, {
+            duration: 2.0,
+            offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), 1000)
+          })
         } catch (tilesetError) {
           console.error('加载3D Tiles模型失败:', tilesetError)
         }
