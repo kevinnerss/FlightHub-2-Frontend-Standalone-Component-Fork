@@ -172,6 +172,52 @@ export default {
     return { total, byStatus, window: { start, end } }
   },
 
+  async getDetectTypeStats(){
+    const alarmsRes = await fetchAllAlarmsByPaging({ page_size: 20000 });
+    const total = alarmsRes.totalCount;
+    const list = alarmsRes.collected || [];
+
+    const alarms = list.map(item => ({
+      ...item,
+      id: item.category_details?.id,
+      detectType: item.category_details?.code || '未分类'
+    }));
+
+    const typeMap = {
+      rail: "铁路",
+      contactline: "接触网",
+      bridge: "桥梁",
+      protected_area: "保护区"
+    };
+
+    const count = {};
+    for (const type in typeMap) {
+      count[type] = 0;
+    }
+
+    alarms.forEach(item => {
+      const type = item.detectType;
+      count[type]++;
+    });
+
+    const result = Object.entries(typeMap).map(([type, name]) => ({
+      name,
+      value: count[type] || 0
+    }));
+
+    const series = result.map((item, idx) => ({
+      id: idx,
+      name: item.name,
+      value: item.value,
+      color: SERIES_COLORS[idx % SERIES_COLORS.length]
+    }))
+
+    return {
+      total,
+      series: series
+    };
+  },
+
   async getAlertWaylineStats({ days = 30, months = null, topN = 6 } = {}) {
     const now = new Date()
     const end = endOfDay(now)

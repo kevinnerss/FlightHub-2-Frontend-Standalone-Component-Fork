@@ -72,22 +72,22 @@
           :more-to="routes.alarmStats"
           :loading="loading.alarmStats"
           :error="errors.alarmStats"
-          :is-empty="!alertWaylineStats || alertWaylineStats.total === 0"
+          :is-empty="!alertDetectTypeStats || alertDetectTypeStats.total === 0"
           empty-text="暂无统计"
         >
           <div class="stats-wrap">
             <div class="stats-total">
               <span class="stats-label">近12个月告警</span>
-              <span class="stats-value">{{ (alertWaylineStats && alertWaylineStats.total) || 0 }}</span>
+              <span class="stats-value">{{ (alertDetectTypeStats && alertDetectTypeStats.total) || 0 }}</span>
             </div>
-            <div v-if="alertWaylineStats && alertWaylineStats.total > 0" class="donut-mini-content">
+            <div v-if="alertDetectTypeStats && alertDetectTypeStats.total > 0" class="donut-mini-content">
               <DonutRing
-                :series="alertWaylineStats.series"
+                :series="alertDetectTypeStats.series"
                 total-label="总异常"
-                :total-value="alertWaylineStats.total"
+                :total-value="alertDetectTypeStats.total"
               />
               <div class="donut-mini-legend">
-                <div v-for="item in alertWaylineStats.series" :key="item.id" class="legend-item">
+                <div v-for="item in alertDetectTypeStats.series" :key="item.id" class="legend-item">
                   <span class="legend-dot" :style="{ background: item.color }"></span>
                   <div class="legend-text">
                     <span class="legend-name" :title="item.name">{{ item.name }}</span>
@@ -112,42 +112,62 @@
         </div>
 
         <div class="bottom-media">
-          <div class="glass-card hero-card">
-            <div class="hero-overlay"></div>
-            <div class="hero-content">
-              <div class="hero-header">
-                <div>
-                  <p class="hero-label">安全运行天数</p>
-                  <div class="hero-number">
-                    {{ safetyStats.safetyDays }}
-                    <span class="hero-unit">天</span>
+          <div class="dashboard-card">
+            <div class="card-header">
+              <div class="header-main">
+                <span class="card-icon" aria-hidden="true">🛡️</span>
+                <h3 class="card-title">系统安全</h3>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="corner top-left"></div>
+              <div class="corner top-right"></div>
+              <div class="corner bottom-left"></div>
+              <div class="corner bottom-right"></div>
+              <div class="hero-content">
+                <div class="hero-header">
+                  <div>
+                    <p class="hero-label">安全运行天数</p>
+                    <div class="hero-number">
+                      {{ safetyStats.safetyDays }}
+                      <span class="hero-unit">天</span>
+                    </div>
+                  </div>
+                  <span class="hero-tag">本年度</span>
+                </div>
+                <div class="hero-summary">
+                  <div v-for="s in safetyStatuses" :key="s.label" class="summary-chip">
+                    <span class="chip-dot" :style="{ background: s.color }"></span>
+                    <span class="chip-label">{{ s.label }}</span>
+                    <span class="chip-value">{{ s.value }}</span>
                   </div>
                 </div>
-                <span class="hero-tag">本年度</span>
-              </div>
-              <div class="hero-summary">
-                <div v-for="s in safetyStatuses" :key="s.label" class="summary-chip">
-                  <span class="chip-dot" :style="{ background: s.color }"></span>
-                  <span class="chip-label">{{ s.label }}</span>
-                  <span class="chip-value">{{ s.value }}</span>
+                <div class="hero-foot">
+                  <span class="foot-label">最近告警时间</span>
+                  <span class="foot-value">{{ safetyLastUpdated }}</span>
                 </div>
-              </div>
-              <div class="hero-foot">
-                <span class="foot-label">最近告警时间</span>
-                <span class="foot-value">{{ safetyLastUpdated }}</span>
               </div>
             </div>
           </div>
 
-          <div class="glass-card playback-card">
-            <div class="card-header-lite">
-              <h3>🎞️ 航迹回放</h3>
-            </div>
-            <div class="playback-content">
-              <div class="playback-ui">
-                <button class="btn-play-large" aria-label="播放" />
+          <div class="dashboard-card">
+            <div class="card-header">
+              <div class="header-main">
+                <span class="card-icon" aria-hidden="true">🎞️</span>
+                <h3 class="card-title">航迹回放</h3>
               </div>
-              <div class="time-stamp-v2">{{ nowStamp }}</div>
+            </div>
+            <div class="card-body">
+              <div class="corner top-left"></div>
+              <div class="corner top-right"></div>
+              <div class="corner bottom-left"></div>
+              <div class="corner bottom-right"></div>
+              <div class="playback-content">
+                <div class="playback-ui">
+                  <button class="btn-play-large" aria-label="播放" />
+                </div>
+                <div class="time-stamp-v2">{{ nowStamp }}</div>
+              </div>
             </div>
           </div>
         </div>
@@ -201,7 +221,7 @@
               <div v-for="t in recentTasks" :key="t.id" class="table-row">
                 <span class="col">{{ t.detect_category_name || "--" }}</span>
                 <span class="col">
-                  <span class="pill">{{ t.detect_status }}</span>
+                  <span class="pill">{{ getStatusText(t.detect_status) }}</span>
                 </span>
                 <span class="col">{{ formatDateTime(t.created_at) }}</span>
               </div>
@@ -287,6 +307,7 @@ export default {
       docks: [],
       recentAlarms: [],
       alertWaylineStats: null,
+      alertDetectTypeStats: null,
       aiSlides: [],
       aiIndex: 0,
       aiTimer: null,
@@ -476,6 +497,9 @@ initCesiumMap() {
       this.errors.alarmStats = ''
       try {
         this.alertWaylineStats = await homeDashboardApi.getAlertWaylineStats({ months: 12, topN: 6 })
+        console.log(this.alertWaylineStats)
+        this.alertDetectTypeStats = await homeDashboardApi.getDetectTypeStats()
+        console.log(this.alertDetectTypeStats)
       } catch (e) {
         this.alertWaylineStats = null
         this.errors.alarmStats = this.getErrMsg(e, '加载告警统计失败')
@@ -545,6 +569,15 @@ initCesiumMap() {
     },
     formatWindSpeed(speed) {
       return speed !== null && speed !== undefined ? `${speed} m/s` : '--'
+    },
+    getStatusText(status) {
+      const statusMap = {
+        'pending': '待检测',
+        'processing': '检测中',
+        'done': '已完成',
+        'failed': '失败'
+      }
+      return statusMap[status] || status
     },
     getDroneInDockText(state) {
       const stateMap = {
@@ -733,7 +766,62 @@ initCesiumMap() {
   opacity: 0.8;
 }
 
-/* --- 下面保持原样 --- */
+.dashboard-card {
+  background: rgba(10, 35, 65, 0.7);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 191, 255, 0.3);
+  box-shadow: 0 0 20px rgba(0, 140, 255, 0.2) inset;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+  height: 100%;
+  transition: all 0.3s ease;
+}
+
+.dashboard-card:hover {
+  border-color: rgba(0, 191, 255, 0.5);
+  box-shadow: 0 0 25px rgba(0, 140, 255, 0.3) inset;
+}
+
+.corner {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #00bfff;
+  z-index: 2;
+}
+.top-left { top: -1px; left: -1px; border-right: none; border-bottom: none; }
+.top-right { top: -1px; right: -1px; border-left: none; border-bottom: none; }
+.bottom-left { bottom: -1px; left: -1px; border-right: none; border-top: none; }
+.bottom-right { bottom: -1px; right: -1px; border-left: none; border-top: none; }
+
+.card-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 16px;
+  background: linear-gradient(to bottom, rgba(0, 110, 255, 0.25), transparent);
+  border-bottom: 1px solid rgba(0, 191, 255, 0.15);
+  min-height: 48px;
+}
+
+.header-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 60%;
+}
+
+.card-body {
+  flex: 1;
+  padding: 10px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .bottom-media {
   grid-row: span 1;
   display: grid;
