@@ -82,8 +82,9 @@ export default {
   // 设备控制命令
   async sendDeviceCommand(deviceSn, command) {
     try {
-      // Calls POST /api/v1/flight-task-proxy/device/{device_sn}/command/
-      const response = await api.post(`/flight-task-proxy/device/${deviceSn}/command/`, {
+      // Calls POST /api/v1/flight-task-proxy/{device_sn}/command/
+      // Django ViewSet 的 detail=True 会将 URL 参数作为 pk 传递
+      const response = await api.post(`/flight-task-proxy/${deviceSn}/command/`, {
         device_command: command
       })
       return response
@@ -100,7 +101,7 @@ export default {
 
   // 取消返航
   async cancelReturn(deviceSn) {
-    return this.sendDeviceCommand(deviceSn, 'cancel_return_home')
+    return this.sendDeviceCommand(deviceSn, 'return_home_cancel')
   },
 
   // 暂停任务

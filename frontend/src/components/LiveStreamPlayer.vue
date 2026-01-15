@@ -68,7 +68,7 @@
 
       <div v-if="loading" class="overlay loading-overlay">
         <div class="loading-spinner"></div>
-        <p>正在连接 FMP4 直播流...</p>
+        <p>正在连接直播流...</p>
       </div>
 
       <div v-if="hasError" class="overlay error-overlay">
@@ -89,8 +89,18 @@
           <span class="info-label">流地址:</span>
           <span class="info-value">{{ streamUrl || '未配置' }}</span>
         </span>
+        <span class="info-item">
+          <span class="info-label">在线状态:</span>
+          <span v-if="checkingStream" class="info-value">
+            <span class="mini-spinner-inline"></span>
+            检查中...
+          </span>
+          <span v-else-if="isStreamOnline === true" class="info-value status-online">● 在线</span>
+          <span v-else-if="isStreamOnline === false" class="info-value status-offline">● 离线</span>
+          <span v-else class="info-value status-unknown">○ 未知</span>
+        </span>
         <span v-if="isPlaying" class="info-item">
-          <span class="info-label">状态:</span>
+          <span class="info-label">播放:</span>
           <span class="info-value status-active">正在播放</span>
         </span>
       </div>
@@ -136,18 +146,23 @@ export default {
       loading: false,
       hasError: false,
       errorMessage: '',
-      // 监听状态 - 从 localStorage 恢复
-      isMonitoring: this.getStoredMonitorStatus(),
+      // 🔥 修复：初始状态为 false，不从 localStorage 恢复
+      // 按钮状态完全由用户操作控制
+      isMonitoring: false,
       monitorLoading: false,
-      monitorCheckTimer: null
+      monitorCheckTimer: null,
+      // 🔥 新增：流状态检查
+      isStreamOnline: null,  // null=未检查, true=在线, false=离线
+      checkingStream: false
     }
   },
   computed: {
-    // 🔥【关键修改】使用 .live.mp4 后缀，原生支持，无需插件
+    // 🔥 恢复到之前的 FMP4 格式（能正常工作）
     streamUrl() {
       // 如果你想灵活传参，可以使用下面这行：
       if (this.streamUrlOverride) return this.streamUrlOverride
       if (!this.streamId) return ''
+      // 使用 FMP4 格式 (.live.mp4)，浏览器原生支持
       return `${this.zlmServer}/live/${this.streamId}.live.mp4`
 
       // 如果你想强制写死 drone03 测试，可以用这行：
@@ -279,15 +294,27 @@ export default {
     // 切换播放/暂停
     togglePlay() {
       const video = this.$refs.videoElement
+      const flvPlayer = this._flvPlayer
+
       if (!video) return
 
       if (this.isPlaying) {
-        video.pause()
+        if (flvPlayer) {
+          flvPlayer.pause()
+        } else {
+          video.pause()
+        }
         this.isPlaying = false
       } else {
-        video.play().catch(err => {
-          console.error('播放失败:', err)
-        })
+        if (flvPlayer) {
+          flvPlayer.play().catch(err => {
+            console.error('FLV 播放失败:', err)
+          })
+        } else {
+          video.play().catch(err => {
+            console.error('播放失败:', err)
+          })
+        }
         this.isPlaying = true
       }
     },
@@ -329,16 +356,48 @@ export default {
     },
 
     onError(e) {
-      console.error('视频元素错误:', e)
-      // 忽略手动切换 src 时的 abort 错误
-      if (this.$refs.videoElement && this.$refs.videoElement.error && this.$refs.videoElement.error.code === 20) {
-        return
+      console.error('❌ 视频元素错误:', e)
+
+      const video = this.$refs.videoElement
+      if (video && video.error) {
+        const errorCode = video.error.code
+        const errorMsg = video.error.message
+
+        console.error('错误代码:', errorCode)
+        console.error('错误信息:', errorMsg)
+
+        // 🔥 详细的错误诊断
+        let errorDetail = ''
+        switch (errorCode) {
+          case 1: // MEDIA_ERR_ABORTED
+            errorDetail = '用户中止'
+            break
+          case 2: // MEDIA_ERR_NETWORK
+            errorDetail = '网络错误 - 请检查流是否正在推流'
+            break
+          case 3: // MEDIA_ERR_DECODE
+            errorDetail = '视频解码错误 - 可能是编码格式不支持（H.265等）'
+            break
+          case 4: // MEDIA_ERR_SRC_NOT_SUPPORTED
+            errorDetail = '视频格式不支持 - 请检查推流编码格式'
+            break
+          default:
+            errorDetail = `未知错误 (${errorCode})`
+        }
+
+        console.error('错误详情:', errorDetail)
+
+        // 忽略手动切换 src 时的 abort 错误
+        if (errorCode === 20) {
+          return
+        }
+
+        if (!this.hasError) {
+          this.hasError = true
+          this.errorMessage = `播放失败: ${errorDetail}`
+        }
       }
 
-      if (!this.hasError) {
-        this.hasError = true
-        this.errorMessage = '视频连接失败或流不存在'
-      }
       this.loading = false
       this.isPlaying = false
     },
@@ -366,15 +425,17 @@ export default {
       try {
         const response = await liveMonitorApi.startMonitor(this.streamId, 3.0)
         console.log('✅ 监听已启动:', response)
+
+        // 🔥 修复：直接设置状态为 true，不依赖服务器同步
         this.isMonitoring = true
-        // 🔥 保存状态到本地
         this.setStoredMonitorStatus(true)
+
         this.$emit('monitor-started', response)
       } catch (err) {
         console.error('❌ 启动监听失败:', err)
         const errorMsg = err.response?.data?.message || err.message || '启动失败'
         alert(`启动保护区检测失败: ${errorMsg}`)
-        // 失败时不保存状态
+        // 失败时保持当前状态不变
       } finally {
         this.monitorLoading = false
       }
@@ -385,15 +446,17 @@ export default {
       try {
         const response = await liveMonitorApi.stopMonitor(this.streamId)
         console.log('✅ 监听已停止:', response)
+
+        // 🔥 修复：直接设置状态为 false，不依赖服务器同步
         this.isMonitoring = false
-        // 🔥 清除本地状态
         this.clearStoredMonitorStatus()
+
         this.$emit('monitor-stopped', response)
       } catch (err) {
         console.error('❌ 停止监听失败:', err)
         const errorMsg = err.response?.data?.message || err.message || '停止失败'
         alert(`停止保护区检测失败: ${errorMsg}`)
-        // 即使失败也尝试清除本地状态(假设后端已停止)
+        // 即使失败也设置为 false（用户意图是停止）
         this.isMonitoring = false
         this.clearStoredMonitorStatus()
       } finally {
@@ -444,6 +507,123 @@ export default {
         // 如果服务器查询失败,使用本地缓存的状态
         console.warn('从服务器同步状态失败,使用本地缓存:', err)
         // 此时 isMonitoring 已经在 data() 中从 localStorage 恢复了
+      }
+    },
+
+    // ========== 🔥 新增：流状态检查方法 ==========
+
+    /**
+     * 页面加载时检查一次后端状态
+     * 之后不再自动改变，完全由用户操作控制
+     */
+    async checkBackendMonitorStatusOnce() {
+      try {
+        const status = await liveMonitorApi.getStatus(this.streamId)
+        const serverIsRunning = status.is_running || false
+
+        console.log(`🔍 [初始检查] 后端监听状态: ${serverIsRunning}`)
+
+        // 🔥 只在页面加载时同步一次真实状态
+        // 之后完全由用户操作控制，不再自动改变
+        if (serverIsRunning) {
+          this.isMonitoring = true
+          this.setStoredMonitorStatus(true)
+          console.log('✅ 后端正在运行，前端状态设为：正在检测')
+        } else {
+          this.isMonitoring = false
+          this.clearStoredMonitorStatus()
+          console.log('✅ 后端未运行，前端状态设为：未检测')
+        }
+      } catch (err) {
+        // 检查失败时保持默认状态（false）
+        console.warn('⚠️ 检查后端状态失败，使用默认状态（未检测）:', err)
+        this.isMonitoring = false
+      }
+    },
+
+    /**
+     * 检查当前流是否在线
+     * 通过 ZLM API 查询流列表
+     */
+    async checkStreamOnline() {
+      if (!this.streamId) return
+
+      this.checkingStream = true
+      try {
+        // 调用 ZLM API 检查流是否在线
+        const apiUrl = `${this.zlmServer}/index/api/isMediaOnline`
+        const params = new URLSearchParams({
+          secret: '123456',
+          vhost: '__defaultVhost__',
+          app: 'live',
+          stream: this.streamId
+        })
+
+        console.log('🔍 检查流状态:', `${apiUrl}?${params}`)
+
+        const response = await fetch(`${apiUrl}?${params}`)
+
+        console.log('📡 API 响应状态:', response.status)
+
+        const result = await response.json()
+        console.log('📄 API 响应数据:', result)
+
+        if (result.code === 0) {
+          // 🔥 ZLM 返回的数据可能是数字或布尔值
+          const isOnline = result.data === 1 || result.data === true || result.data === '1'
+          this.isStreamOnline = isOnline
+          console.log(`✅ 流 ${this.streamId} 在线状态: ${this.isStreamOnline}`)
+        } else {
+          console.warn(`⚠️ ZLM API 返回错误: code=${result.code}, msg=${result.msg}`)
+          // 🔥 如果 API 失败，但视频能播放，我们认为是在线的
+          if (this.isPlaying) {
+            this.isStreamOnline = true
+            console.log('✅ API 检查失败，但视频正在播放，标记为在线')
+          } else {
+            this.isStreamOnline = false
+          }
+        }
+      } catch (err) {
+        console.error('❌ 检查流状态失败:', err)
+        // 🔥 如果网络错误，但视频能播放，我们认为是在线的
+        if (this.isPlaying) {
+          this.isStreamOnline = true
+          console.log('✅ 网络错误，但视频正在播放，标记为在线')
+        } else {
+          this.isStreamOnline = false
+        }
+      } finally {
+        this.checkingStream = false
+      }
+    },
+
+    /**
+     * 获取所有在线流列表
+     * 返回格式: [{ app: 'live', stream: 'dock01' }, ...]
+     */
+    async getOnlineStreams() {
+      try {
+        const apiUrl = `${this.zlmServer}/index/api/getMediaList`
+        const params = new URLSearchParams({
+          secret: '123456',
+          app: 'live'
+        })
+
+        const response = await fetch(`${apiUrl}?${params}`)
+        const result = await response.json()
+
+        if (result.code === 0) {
+          const streams = result.data || []
+          console.log(`📹 当前在线流数量: ${streams.length}`)
+          console.log('📋 在线流列表:', streams.map(s => `${s.app}/${s.stream}`).join(', '))
+          return streams
+        } else {
+          console.warn(`⚠️ 获取流列表失败: ${result.msg}`)
+          return []
+        }
+      } catch (err) {
+        console.error('❌ 获取在线流列表失败:', err)
+        return []
       }
     }
   }
@@ -727,6 +907,32 @@ export default {
 .status-active {
   color: #10b981;
   font-weight: 600;
+}
+
+.status-online {
+  color: #10b981;
+  font-weight: 600;
+}
+
+.status-offline {
+  color: #ef4444;
+  font-weight: 600;
+}
+
+.status-unknown {
+  color: #94a3b8;
+}
+
+.mini-spinner-inline {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(0, 212, 255, 0.2);
+  border-top-color: #00d4ff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  margin-right: 4px;
+  vertical-align: middle;
 }
 
 .placeholder-overlay p {

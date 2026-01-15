@@ -545,24 +545,18 @@ export default {
       this.stats.totalAlarms = alarms.length
       const todayKey = this.formatDateParam(new Date())
       this.stats.todayAlarms = alarms.filter(item => this.formatDateParam(this.parsePlainDate(item.created_at)) === todayKey).length
-      const latest = alarms.reduce((latestTs, alarm) => {
+      const oldest = alarms.reduce((oldestTs, alarm) => {
         const ts = this.parsePlainDate(alarm.created_at)
-        if (Number.isNaN(ts.getTime())) return latestTs
-        if (!latestTs) return ts
-        return ts > latestTs ? ts : latestTs
+        if (Number.isNaN(ts.getTime())) return oldestTs
+        if (!oldestTs) return ts
+        return ts < oldestTs ? ts : oldestTs
       }, null)
-      if (latest) {
+      if (oldest) {
         const now = Date.now()
-        const diffDays = Math.floor((now - latest.getTime()) / (1000 * 60 * 60 * 24))
+        const diffDays = Math.floor((now - oldest.getTime()) / (1000 * 60 * 60 * 24))
         this.stats.safetyDays = Math.max(diffDays, 0)
       } else {
-        const windowStart = this.months && this.months.length ? this.months[0].start : null
-        if (windowStart instanceof Date && !Number.isNaN(windowStart.getTime())) {
-          const diffDays = Math.floor((Date.now() - windowStart.getTime()) / (1000 * 60 * 60 * 24))
-          this.stats.safetyDays = Math.max(diffDays, 0)
-        } else {
-          this.stats.safetyDays = 0
-        }
+        this.stats.safetyDays = 0
       }
       this.safetyStatuses = [
         { label: '今日异常', value: this.stats.todayAlarms, color: '#38bdf8' },

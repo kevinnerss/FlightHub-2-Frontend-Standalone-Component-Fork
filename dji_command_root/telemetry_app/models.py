@@ -220,6 +220,10 @@ class InspectImage(models.Model):
                                      verbose_name="检测状态")
     result = models.JSONField(null=True, blank=True, verbose_name="检测结果")
 
+    # 🔥 新增：重试次数字段，用于失败重试机制
+    retry_count = models.IntegerField(default=0, verbose_name="重试次数")
+    max_retries = 3  # 最大重试次数（类常量）
+
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
 

@@ -254,24 +254,37 @@ def create_alarm_from_detection(task, img, result_data):
         lon = gps.get("lon", 0)
         high = gps.get("high")  # 提取高度信息（可能为空）
 
-        # 4. 创建告警
-        Alarm.objects.create(
-            wayline=task.wayline,
-            category=sub_category,
-            source_image=img,
-            image_url=result_data.get("result_object_key") or img.object_key,
-            specific_data=result_data,
+        # 4. 创建告警（避免重复创建）
+        # 🔥 使用 try-except 捕获并发竞态条件
+        try:
+            alarm, created = Alarm.objects.get_or_create(
+                source_image=img,
+                defaults={
+                    'wayline': task.wayline,
+                    'category': sub_category,
+                    'image_url': result_data.get("result_object_key") or img.object_key,
+                    'specific_data': result_data,
+                    'content': f"AI检测发现: {content_text}",
+                    'latitude': lat,
+                    'longitude': lon,
+                    'high': high,
+                    'status': "PENDING",
+                    'handler': "AI_ALGORITHM"
+                }
+            )
 
-            # ⭐ 修改点：直接使用算法返回的描述文本
-            content=f"AI检测发现: {content_text}",
+            if created:
+                print(f"🚨 [Alarm] 告警创建成功！内容: {content_text}, 高度: {high}")
+            else:
+                print(f"ℹ️ [Alarm] 告警已存在，跳过创建。图片ID: {img.id}")
 
-            latitude=lat,
-            longitude=lon,
-            high=high,  # 高度信息
-            status="PENDING",
-            handler="AI_ALGORITHM"
-        )
-        print(f"🚨 [Alarm] 告警创建成功！内容: {content_text}, 高度: {high}")
+        except Exception as alarm_error:
+            # 🔥 如果是唯一性约束错误，说明其他线程已经创建了告警，忽略即可
+            if "UNIQUE constraint" in str(alarm_error) or "unique constraint" in str(alarm_error).lower():
+                print(f"ℹ️ [Alarm] 告警已存在（并发创建），跳过。图片ID: {img.id}")
+            else:
+                # 其他类型的错误，抛出异常
+                raise
 
     except Exception as e:
         print(f"❌ [Alarm] 创建失败: {e}")
@@ -409,79 +422,162 @@ def auto_trigger_detect1(task):
 
 def auto_trigger_detect(task):
     """自动检测全流程 (适配真实算法协议版 + 持续检测新图)"""
-    # 🔥 修改：查询所有pending状态的图片，不管任务是什么时候开始的
-    images = task.images.filter(detect_status="pending").order_by("id")
-    if not images.exists():
-        print(f"⏸️  [Detect] 任务 {task.id} 暂无待检测图片")
+    # 🔥 使用任务级别的锁防止并发启动
+    lock_key = f"detect_task_{task.id}"
+    from django.core.cache import cache
+
+    # 尝试获取锁（过期时间 10 分钟）
+    lock_acquired = cache.add(lock_key, True, timeout=600)
+
+    if not lock_acquired:
+        print(f"⏸️  [Detect] 任务 {task.id} 已有检测线程在运行，跳过")
         return
 
-    # 🔥 修改：只有第一次启动时才更新started_at
-    if not task.started_at:
-        task.started_at = django_timezone.now()
-        task.save(update_fields=['started_at'])
+    try:
+        # 🔥 循环检测：持续处理所有 pending 图片
+        while True:
+            # 🔥 查询所有 pending 状态的图片
+            images = task.images.filter(detect_status="pending").order_by("id")
+            if not images.exists():
+                print(f"⏸️  [Detect] 任务 {task.id} 暂无待检测图片，结束检测")
+                break
 
-    # 🔥 关键：不改变任务状态，保持scanning让轮询继续扫描新图
+            # 🔥 防止重复检测：立即将所有 pending 图片标记为 processing（原子操作）
+            updated_count = task.images.filter(detect_status="pending").update(detect_status="processing")
+            if updated_count > 0:
+                print(f"🔒 [Detect] 任务 {task.id} 锁定 {updated_count} 张图片，开始检测...")
 
-    detect_url = getattr(settings, "FASTAPI_DETECT_URL", "http://localhost:8088/detect")
-    algo_type = normalize_detect_code(task.detect_category.code) if task.detect_category else "rail"
+            # 重新查询（现在已经是 processing 状态了）
+            images = task.images.filter(detect_status="processing").order_by("id")
 
-    for img in images:
-        img.detect_status = "processing"
-        img.save(update_fields=['detect_status'])
+            # 🔥 修改：只有第一次启动时才更新 started_at
+            if not task.started_at:
+                task.started_at = django_timezone.now()
+                task.save(update_fields=['started_at'])
 
-        # 1. 构造极简请求 (符合之前确认的3字段协议)
-        """payload = {
-            "bucket": task.bucket,
-            "object_key": img.object_key,
-            "detect_type": algo_type
-        }"""
-        payload = {
-            # 1. 必填字段 (算法要的)
-            "req_id": f"req_{uuid.uuid4().hex[:8]}",  # 随机生成一个ID
-            "image_id": img.id,  # 真实的图片ID
-            "wayline_id": str(task.wayline_id) if task.wayline_id else "0",  # 转字符串
-            "timestamp": int(time.time()),  # 当前时间戳
+            # 🔥 关键：不改变任务状态，保持 scanning 让轮询继续扫描新图
 
-            # 2. 核心字段 (业务要的)
-            "bucket": task.bucket,
-            "object_key": img.object_key,
-            "detect_type": algo_type
-        }
+            detect_url = getattr(settings, "FASTAPI_DETECT_URL", "http://localhost:8088/detect")
+            algo_type = normalize_detect_code(task.detect_category.code) if task.detect_category else "rail"
 
-        try:
-            # 发送请求
-            resp = requests.post(detect_url, json=payload, timeout=300)
+            # 🔥 提前导入 time 模块，避免循环内重复导入
+            import time
 
-            if resp.status_code == 200:
-                # ⭐ 改动点1：直接获取 JSON，不要 .get("data")
-                # 因为算法返回的是扁平结构
-                data = resp.json()
+            for img in images:
+                # 🔥 注意：不再需要 refresh_from_db()
+                # 因为在函数开始时已经通过任务锁 + 批量更新锁定图片
+                # 直接检测即可，避免竞态条件导致跳过检测
 
-                img.result = data
-                img.detect_status = "done"
-                img.save(update_fields=['detect_status', 'result'])
+                # 1. 构造极简请求 (符合之前确认的3字段协议)
+                payload = {
+                    # 1. 必填字段 (算法要的)
+                    "req_id": f"req_{uuid.uuid4().hex[:8]}",  # 随机生成一个ID
+                    "image_id": img.id,  # 真实的图片ID
+                    "wayline_id": str(task.wayline_id) if task.wayline_id else "0",  # 转字符串
+                    "timestamp": int(time.time()),  # 当前时间戳
 
-                algo_status = data.get("detection_status", 0)
+                    # 2. 核心字段 (业务要的)
+                    "bucket": task.bucket,
+                    "object_key": img.object_key,
+                    "detect_type": algo_type
+                }
 
-                if algo_status == 1:
-                    # 只有真的是异常 (1)，才创建 Alarm 记录
-                    print(f"⚠️ [Detect] 图片 {img.id} 确认为异常 (Status=1)，生成告警...")
-                    create_alarm_from_detection(task, img, data)
-                else:
-                    # 正常 (0)，只打印日志，不往 Alarm 表里写垃圾数据
-                    print(f"✅ [Detect] 图片 {img.id} 检测通过 (Status=0).")
-            else:
-                print(f"❌ [Detect] 算法返回错误: {resp.status_code} - {resp.text}")
-                img.detect_status = "failed"
-                img.save(update_fields=['detect_status'])
+                # 🔥 性能监控：记录开始时间
+                detect_start_time = time.time()
 
-        except Exception as e:
-            print(f"❌ [Detect] 请求异常: {e}")
-            img.detect_status = "failed"
-            img.save(update_fields=['detect_status'])
+                try:
+                    # 🔥 修复 5：增加超时时间到 180 秒（3分钟），适应 GLM-4V 模型处理速度
+                    # GLM-4V 等大模型处理图片通常需要 1-2 分钟
+                    resp = requests.post(detect_url, json=payload, timeout=180)
 
-    # 🔥 修改：检测完这一批后，不立即结束任务，交给轮询线程判断
-    print(f"✅ [Detect] 任务 {task.id} 本轮检测完成 ({len(images)}张)，等待轮询线程判断是否结束...")
+                    # 🔥 性能监控：记录耗时
+                    elapsed_time = time.time() - detect_start_time
+                    print(f"⏱️ [Detect] 图片 {img.id} 检测耗时: {elapsed_time:.2f} 秒")
+
+                    # 🔥 性能警告：如果耗时过长，记录日志
+                    if elapsed_time > 120:
+                        print(f"⚠️ [Detect] 图片 {img.id} 检测耗时较长: {elapsed_time:.2f} 秒")
+
+                    if resp.status_code == 200:
+                        # ⭐ 改动点1：直接获取 JSON，不要 .get("data")
+                        # 因为算法返回的是扁平结构
+                        data = resp.json()
+
+                        img.result = data
+                        img.detect_status = "done"
+                        img.save(update_fields=['detect_status', 'result'])
+
+                        algo_status = data.get("detection_status", 0)
+
+                        if algo_status == 1:
+                            # 只有真的是异常 (1)，才创建 Alarm 记录
+                            print(f"⚠️ [Detect] 图片 {img.id} 确认为异常 (Status=1)，生成告警...")
+                            create_alarm_from_detection(task, img, data)
+                        else:
+                            # 正常 (0)，只打印日志，不往 Alarm 表里写垃圾数据
+                            print(f"✅ [Detect] 图片 {img.id} 检测通过 (Status=0).")
+                    else:
+                        print(f"❌ [Detect] 算法返回错误: {resp.status_code} - {resp.text}")
+
+                        # 🔥 算法服务错误（5xx）可以重试，客户端错误（4xx）不重试
+                        if resp.status_code >= 500 and img.retry_count < img.max_retries:
+                            img.retry_count += 1
+                            img.detect_status = "pending"  # 重新入队
+                            print(f"🔄 [Detect] 图片 {img.id} 算法服务错误 {resp.status_code}，重试 ({img.retry_count}/{img.max_retries})")
+                            img.save()
+                        else:
+                            img.detect_status = "failed"
+                            img.save(update_fields=['detect_status'])
+
+                # 🔥 修复 3：改进异常处理，区分超时、连接错误等
+                except requests.Timeout:
+                    # 超时：可能是算法服务慢
+                    elapsed_time = time.time() - detect_start_time
+                    print(f"⏱️ [Detect] 图片 {img.id} 检测超时 ({elapsed_time:.2f} 秒)")
+
+                    # 🔥 修复 4：添加重试机制
+                    if img.retry_count < img.max_retries:
+                        img.retry_count += 1
+                        img.detect_status = "pending"  # 重新入队
+                        print(f"🔄 [Detect] 图片 {img.id} 检测超时，重试 ({img.retry_count}/{img.max_retries})")
+                    else:
+                        img.detect_status = "failed"
+                        print(f"❌ [Detect] 图片 {img.id} 检测超时，达到最大重试次数 ({img.max_retries})")
+                    img.save()
+
+                except requests.ConnectionError as conn_err:
+                    # 连接错误：算法服务可能挂了
+                    print(f"🔌 [Detect] 图片 {img.id} 连接算法服务失败: {conn_err}")
+
+                    # 🔥 连接错误也可以重试
+                    if img.retry_count < img.max_retries:
+                        img.retry_count += 1
+                        img.detect_status = "pending"  # 重新入队
+                        print(f"🔄 [Detect] 图片 {img.id} 连接失败，重试 ({img.retry_count}/{img.max_retries})")
+                    else:
+                        img.detect_status = "failed"
+                        print(f"❌ [Detect] 图片 {img.id} 连接失败，达到最大重试次数 ({img.max_retries})")
+                    img.save()
+
+                except Exception as e:
+                    # 其他异常：打印完整堆栈
+                    print(f"❌ [Detect] 图片 {img.id} 检测异常: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+                    # 🔥 其他错误不重试，直接标记失败
+                    img.detect_status = "failed"
+                    img.save()
+
+            # 🔥 本轮检测完成
+            print(f"✅ [Detect] 任务 {task.id} 本轮检测完成 ({len(images)}张)")
+
+            # 🔥 循环继续：回到 while True，检查是否有新的 pending 图片
+
+    finally:
+        # 🔥 释放锁
+        cache.delete(lock_key)
+        print(f"🔓 [Detect] 任务 {task.id} 释放检测锁")
 
 
 # ======================================================================
@@ -2063,6 +2159,9 @@ class MediaLibraryViewSet(viewsets.ViewSet):
 live_monitor_threads = {}
 # 格式: { "stream_id": { "thread": Thread对象, "stop_event": Event对象, "task": InspectTask对象 } }
 
+# 🔥 新增：线程锁，防止并发启动同一个流的多个监听线程
+live_monitor_lock = threading.Lock()
+
 
 class LiveMonitorViewSet(viewsets.ViewSet):
     """
@@ -2080,57 +2179,64 @@ class LiveMonitorViewSet(viewsets.ViewSet):
         stream_id = request.data.get('stream_id', 'drone01')
         interval = float(request.data.get('interval', 3.0))
 
-        # 检查是否已经在运行
-        if stream_id in live_monitor_threads:
-            return Response(
-                {"status": "error", "message": f"流 {stream_id} 的监听已在运行中"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        # 🔥 使用线程锁，防止并发启动多个线程
+        with live_monitor_lock:
+            # 在锁内再次检查（双重检查锁定模式）
+            if stream_id in live_monitor_threads:
+                return Response(
+                    {"status": "error", "message": f"流 {stream_id} 的监听已在运行中"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
-        try:
-            # 创建停止事件
-            stop_event = threading.Event()
+            try:
+                # 创建停止事件
+                stop_event = threading.Event()
 
-            # 启动监听线程
-            monitor_thread = threading.Thread(
-                target=self._run_monitor,
-                args=(stream_id, interval, stop_event),
-                daemon=True
-            )
-            monitor_thread.start()
+                # 🔥 关键修复：先记录线程信息，再启动线程
+                # 这样即使线程立即失败，记录也存在，可以正常停止
+                monitor_thread = threading.Thread(
+                    target=self._run_monitor,
+                    args=(stream_id, interval, stop_event),
+                    daemon=True,
+                    name=f"Monitor-{stream_id}"
+                )
 
-            # 等待一下确保任务创建完成
-            time.sleep(0.5)
+                # 🔥 在线程启动前就记录信息
+                live_monitor_threads[stream_id] = {
+                    "thread": monitor_thread,
+                    "stop_event": stop_event,
+                    "task": None,  # 初始为None，线程内会更新
+                    "started_at": django_timezone.now().isoformat()
+                }
 
-            # 查找刚创建的任务
-            current_task = InspectTask.objects.filter(
-                external_task_id__contains=f"直播_{stream_id}"
-            ).order_by('-created_at').first()
+                print(f"✅ [线程记录] Stream: {stream_id} | 已记录到 live_monitor_threads")
 
-            # 记录线程信息
-            live_monitor_threads[stream_id] = {
-                "thread": monitor_thread,
-                "stop_event": stop_event,
-                "task": current_task,
-                "started_at": django_timezone.now().isoformat()
-            }
+                # 启动线程
+                monitor_thread.start()
+                print(f"✅ [线程启动] Stream: {stream_id} | Thread: {monitor_thread.name}")
 
-            return Response({
-                "status": "success",
-                "message": f"直播监听已启动: {stream_id}",
-                "stream_id": stream_id,
-                "interval": interval,
-                "task_id": current_task.id if current_task else None
-            })
+                return Response({
+                    "status": "success",
+                    "message": f"直播监听已启动: {stream_id}",
+                    "stream_id": stream_id,
+                    "interval": interval,
+                    "task_id": None  # 任务ID会在首帧成功后创建
+                })
 
-        except Exception as e:
-            print(f"❌ 启动监听失败: {e}")
-            import traceback
-            traceback.print_exc()
-            return Response(
-                {"status": "error", "message": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            except Exception as e:
+                print(f"❌ 启动监听失败: {e}")
+                import traceback
+                traceback.print_exc()
+
+                # 🔥 失败时清理可能已创建的记录
+                if stream_id in live_monitor_threads:
+                    del live_monitor_threads[stream_id]
+                    print(f"🧹 [清理记录] Stream: {stream_id} | 已从 live_monitor_threads 删除")
+
+                return Response(
+                    {"status": "error", "message": str(e)},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
 
     @action(detail=False, methods=['post'], url_path='stop')
     def stop_monitor(self, request):
@@ -2141,41 +2247,85 @@ class LiveMonitorViewSet(viewsets.ViewSet):
         """
         stream_id = request.data.get('stream_id', 'drone01')
 
-        if stream_id not in live_monitor_threads:
-            return Response(
-                {"status": "error", "message": f"流 {stream_id} 没有运行中的监听"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        print(f"\n{'='*60}")
+        print(f"🔴 [停止请求] 收到停止监听请求: stream_id={stream_id}")
+        print(f"🔴 [停止请求] 当前运行中的线程列表: {list(live_monitor_threads.keys())}")
+        print(f"{'='*60}\n")
 
-        try:
-            # 发送停止信号
-            monitor_info = live_monitor_threads[stream_id]
-            monitor_info["stop_event"].set()
+        # 🔥 使用线程锁，防止并发问题
+        with live_monitor_lock:
+            if stream_id not in live_monitor_threads:
+                print(f"⚠️ [停止失败] stream_id={stream_id} 不在运行列表中")
+                return Response(
+                    {"status": "error", "message": f"流 {stream_id} 没有运行中的监听"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
-            # 等待线程结束（最多3秒）
-            monitor_info["thread"].join(timeout=3)
+            try:
+                # 发送停止信号
+                monitor_info = live_monitor_threads[stream_id]
 
-            # 更新任务状态为完成
-            if monitor_info["task"]:
-                task = monitor_info["task"]
-                task.detect_status = "done"
-                task.finished_at = django_timezone.now()
-                task.save(update_fields=['detect_status', 'finished_at'])
+                print(f"🔍 [停止调试] 找到线程信息:")
+                print(f"  - 线程对象: {monitor_info['thread']}")
+                print(f"  - 线程名称: {monitor_info['thread'].name}")
+                print(f"  - 线程是否存活: {monitor_info['thread'].is_alive()}")
+                print(f"  - 停止事件: {monitor_info['stop_event']}")
+                print(f"  - 停止事件状态(设置前): {monitor_info['stop_event'].is_set()}")
 
-            # 移除记录
-            del live_monitor_threads[stream_id]
+                # 🔥 设置停止信号
+                monitor_info["stop_event"].set()
+                print(f"🔴 [停止信号] 已设置停止事件")
+                print(f"  - 停止事件状态(设置后): {monitor_info['stop_event'].is_set()}")
 
-            return Response({
-                "status": "success",
-                "message": f"直播监听已停止: {stream_id}"
-            })
+                # 🔥 修复：等待线程结束（最多10秒，确保当前截图完成）
+                # 给足够时间让当前截图处理完并退出循环
+                print(f"⏳ [等待线程] 开始等待线程结束（最多10秒）...")
 
-        except Exception as e:
-            print(f"❌ 停止监听失败: {e}")
-            return Response(
-                {"status": "error", "message": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+                import time
+                start_wait = time.time()
+                monitor_info["thread"].join(timeout=10)
+                wait_time = time.time() - start_wait
+
+                print(f"⏳ [等待线程] 等待完成，耗时 {wait_time:.2f}秒")
+                print(f"  - 线程是否还存活: {monitor_info['thread'].is_alive()}")
+
+                if monitor_info['thread'].is_alive():
+                    print(f"⚠️ [警告] 线程在10秒后仍在运行，可能是线程卡死或stop_event检查失败")
+
+                # 🔥 修复：如果线程还在运行，强制更新任务状态
+                if monitor_info["task"]:
+                    task = InspectTask.objects.get(id=monitor_info["task"].id)
+                    task.detect_status = "done"
+                    task.finished_at = django_timezone.now()
+                    task.save(update_fields=['detect_status', 'finished_at'])
+                    print(f"✅ [停止完成] 任务 {task.external_task_id} 已标记为完成")
+
+                # 移除记录（在锁内完成）
+                del live_monitor_threads[stream_id]
+
+                print(f"🛑 [监听停止] Stream: {stream_id}")
+                print(f"🛑 [清理完成] 已从 live_monitor_threads 删除")
+                print(f"🔍 [剩余线程] 当前运行中的线程: {list(live_monitor_threads.keys())}")
+                print(f"{'='*60}\n")
+
+                return Response({
+                    "status": "success",
+                    "message": f"直播监听已停止: {stream_id}"
+                })
+
+            except Exception as e:
+                print(f"❌ 停止监听失败: {e}")
+                import traceback
+                traceback.print_exc()
+
+                # 🔥 失败时也尝试清理记录
+                if stream_id in live_monitor_threads:
+                    del live_monitor_threads[stream_id]
+
+                return Response(
+                    {"status": "error", "message": str(e)},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
 
     @action(detail=False, methods=['get'], url_path='status')
     def get_status(self, request):
@@ -2243,34 +2393,67 @@ class LiveMonitorViewSet(viewsets.ViewSet):
         # 用于标记是否已成功截取第一帧
         first_frame_captured = False
 
+        # 🔥 新增：记录循环开始时间
+        import time as time_module
+        loop_count = 0
+
+        print(f"🔄 [循环启动] Stream: {stream_id} | 开始进入主循环")
+
         # 循环抽帧（直到收到停止信号）
         while not stop_event.is_set():
+            loop_count += 1
+            loop_start_time = time_module.time()
+
+            # 🔥 每10次循环打印一次状态
+            if loop_count % 10 == 1:
+                print(f"🔄 [循环状态] Stream: {stream_id} | 第{loop_count}次循环 | stop_event={stop_event.is_set()}")
+
             # 🔥 在每次循环开始都检查停止信号，确保快速响应
             if stop_event.is_set():
+                print(f"🔴 [循环退出-1] Stream: {stream_id} | 在循环开始处检测到停止信号")
                 break
 
             try:
+                # 🔥 关键修复：在每次请求前检查停止信号
+                if stop_event.is_set():
+                    print(f"🔴 [循环退出-2] Stream: {stream_id} | 在请求前检测到停止信号")
+                    break
+
+                # 🔥 新增：打印请求开始时间
+                request_start = time_module.time()
+                if loop_count % 10 == 1:
+                    print(f"📡 [请求开始] Stream: {stream_id} | 准备请求ZLM截图API")
+
                 snap_api = f"{ZLM_API_HOST}/index/api/getSnap"
                 params = {
                     "secret": ZLM_SECRET,
                     "url": f"rtmp://127.0.0.1:1935/live/{stream_id}",
-                    "timeout_sec": 5,  # 🔥 ZLM服务器超时时间(5秒)
+                    "timeout_sec": 10,  # 🔥 ZLM服务器超时10秒(给足够时间截图)
                     "expire_sec": 1
                 }
 
-                # 🔥 requests库超时(8秒),给足够时间完成截图,但不会太久影响停止响应
-                resp = requests.get(snap_api, params=params, timeout=8)
+                # 🔥 requests超时设置为10秒,与ZLM的timeout_sec保持一致
+                resp = requests.get(snap_api, params=params, timeout=10)
+
+                request_time = time_module.time() - request_start
+                if loop_count % 10 == 1:
+                    print(f"📡 [请求完成] Stream: {stream_id} | 请求耗时 {request_time:.2f}秒")
 
                 # 🔥 在处理响应前再次检查停止信号
                 if stop_event.is_set():
-                    print(f"⚠️ [停止中断] 收到停止信号，放弃处理当前帧")
+                    print(f"🔴 [循环退出-3] Stream: {stream_id} | 在响应后检测到停止信号")
                     break
 
                 # 🔥 修复：检查HTTP状态码，避免失败时直接抛异常
                 if resp.status_code != 200:
                     if not first_frame_captured:
                         print(f"⏳ [等待推流] HTTP {resp.status_code} - ZLM可能未准备好...")
-                    stop_event.wait(interval)
+                    # 🔥 关键修复：等待时也要检查停止信号，使用短间隔分段等待
+                    for _ in range(int(interval)):  # 分成1秒的多次检查
+                        if stop_event.is_set():
+                            print(f"⚠️ [停止中断] 等待期间收到停止信号")
+                            break
+                        stop_event.wait(1)  # 每次只等1秒
                     continue
 
                 # 🔥 修复：ZLM的getSnap API直接返回JPEG二进制数据，不是JSON
@@ -2340,6 +2523,11 @@ class LiveMonitorViewSet(viewsets.ViewSet):
                     fname = f"frame_{datetime.now().strftime('%H%M%S_%f')}.jpg"
                     object_key = f"{current_task.prefix_list[0]}{fname}"
 
+                    # 🔥 关键修复：上传前最后一次检查停止信号
+                    if stop_event.is_set():
+                        print(f"⚠️ [停止中断] 上传前收到停止信号")
+                        break
+
                     # 上传到MinIO
                     s3.put_object(
                         Bucket=bucket_name,
@@ -2356,7 +2544,13 @@ class LiveMonitorViewSet(viewsets.ViewSet):
                         wayline=current_task.wayline
                     )
                     frame_count += 1
-                    print(f"📸 [截图] {fname} (总计: {frame_count})")
+                    loop_time = time_module.time() - loop_start_time
+                    print(f"📸 [截图] {fname} (总计: {frame_count}) | 本次循环耗时 {loop_time:.2f}秒")
+
+                    # 🔥 关键修复：触发检测前再次检查停止信号
+                    if stop_event.is_set():
+                        print(f"🔴 [循环退出-4] Stream: {stream_id} | 在触发检测前检测到停止信号")
+                        break
 
                     # 异步触发检测
                     threading.Thread(target=auto_trigger_detect, args=(current_task,)).start()
@@ -2365,14 +2559,42 @@ class LiveMonitorViewSet(viewsets.ViewSet):
                     if not first_frame_captured:
                         print(f"⏳ [等待推流] {stream_id}...")
 
+            except requests.exceptions.Timeout as e:
+                # 🔥 超时异常的特殊处理
+                if not stop_event.is_set():
+                    print(f"⏱️ [请求超时] ZLM截图超时(10秒)，可能是流未推流或ZLM负载高: {e}")
+                    # 🔥 超时后不要立即重试，等待一段时间
+                    for step in range(int(interval)):
+                        if stop_event.is_set():
+                            print(f"🔴 [循环退出-5a] Stream: {stream_id} | 超时等待期间收到停止信号")
+                            break
+                        stop_event.wait(1)
+                    continue
+                else:
+                    print(f"🔴 [循环退出-5b] Stream: {stream_id} | 超时异常时检测到停止信号")
+                    break
             except Exception as e:
                 if not stop_event.is_set():
-                    print(f"❌ 截图异常: {e}")
+                    print(f"❌ 截图异常: {type(e).__name__}: {e}")
+                else:
+                    print(f"🔴 [循环退出-5] Stream: {stream_id} | 异常时检测到停止信号")
+                    break
 
-            # 等待间隔（可被停止信号中断）
-            stop_event.wait(interval)
+            # 🔥 关键修复：等待间隔时使用分段等待，每0.5秒检查一次停止信号
+            # 这样可以更快响应停止操作，最多等待0.5秒就退出
+            wait_steps = int(interval / 0.5)  # 将interval分成0.5秒的小段
+            for step in range(wait_steps):
+                if stop_event.is_set():
+                    print(f"🔴 [循环退出-6] Stream: {stream_id} | 在等待间隔第{step+1}步时检测到停止信号")
+                    break
+                stop_event.wait(0.5)
 
-        print(f"🛑 [监听停止] Stream: {stream_id} | 共截取 {frame_count} 帧")
+        print(f"\n{'='*60}")
+        print(f"🛑 [监听停止] Stream: {stream_id}")
+        print(f"  - 总循环次数: {loop_count}")
+        print(f"  - 总截取帧数: {frame_count}")
+        print(f"  - 线程即将退出")
+        print(f"{'='*60}\n")
 
         # 停止时更新任务状态
         if current_task:
@@ -3349,12 +3571,16 @@ class FlightTaskProxyViewSet(viewsets.ViewSet):
             return Response({"code": 500, "msg": str(e)}, status=500)
 
     @action(detail=True, methods=['post'], url_path='command')
-    def device_command(self, request, device_sn=None):
+    def device_command(self, request, pk=None):
         """
         设备控制命令 (POST /openapi/v0.1/device/{device_sn}/command)
-        支持: return_home, cancel_return_home, flighttask_pause, flighttask_recovery
+        支持: return_home, return_home_cancel, flighttask_pause, flighttask_recovery
+
+        注意：detail=True 时，Django 会将 URL 参数作为 pk 传递，不是 device_sn
         """
         try:
+            device_sn = pk  # 使用 pk 作为 device_sn
+
             headers, base_url = WaylineFingerprintManager.get_api_headers_and_host()
             url = f"{base_url}/openapi/v0.1/device/{device_sn}/command"
 
